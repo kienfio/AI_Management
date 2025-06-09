@@ -29,7 +29,7 @@ user_states = {}
 # 设置日志
 logger = logging.getLogger(__name__)
 
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """处理 /start 命令"""
     welcome_message = """
 🚀 *财务管理助手*
@@ -44,7 +44,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     """
     await update.message.reply_text(welcome_message, parse_mode=ParseMode.MARKDOWN)
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """处理 /help 命令"""
     help_message = """
 📖 *使用指南*
