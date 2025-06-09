@@ -11,8 +11,12 @@ import logging
 # 加载环境变量
 load_dotenv()
 
-# 初始化Google服务
-google_services = GoogleServices()
+# 初始化Google服务（添加错误处理）
+try:
+    google_services = GoogleServices()
+except Exception as e:
+    print(f"初始化Google服务时出错: {e}")
+    google_services = None
 
 # 支出类别列表
 EXPENSE_CATEGORIES = ['食品', '住房', '交通', '娱乐', '医疗', '教育', '水电', '其他']
@@ -25,7 +29,7 @@ user_states = {}
 # 设置日志
 logger = logging.getLogger(__name__)
 
-async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """处理 /start 命令"""
     welcome_message = """
 🚀 *财务管理助手*
@@ -40,7 +44,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     """
     await update.message.reply_text(welcome_message, parse_mode=ParseMode.MARKDOWN)
 
-async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """处理 /help 命令"""
     help_message = """
 📖 *使用指南*
@@ -125,6 +129,10 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def expense_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """处理 /expense 命令"""
+    if google_services is None:
+        await update.message.reply_text("⚠️ Google服务未初始化，无法记录支出")
+        return
+        
     user_id = update.effective_user.id
     message_text = update.message.text
     
@@ -183,6 +191,10 @@ async def expense_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def income_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """处理 /income 命令"""
+    if google_services is None:
+        await update.message.reply_text("⚠️ Google服务未初始化，无法记录收入")
+        return
+        
     user_id = update.effective_user.id
     message_text = update.message.text
     
@@ -237,6 +249,10 @@ async def income_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def report_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """处理 /report 命令，生成月度报告"""
+    if google_services is None:
+        await update.message.reply_text("⚠️ Google服务未初始化，无法生成报告")
+        return
+        
     try:
         args = context.args
         year = None
@@ -297,6 +313,10 @@ async def report_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """处理收据照片"""
+    if google_services is None:
+        await update.message.reply_text("⚠️ Google服务未初始化，无法处理收据")
+        return
+        
     user_id = update.effective_user.id
     
     # 检查用户是否在等待收据
@@ -376,6 +396,13 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif state == 'expense_note':
             note = "" if message_text.lower() in ['无', 'n', 'no', '不需要'] else message_text
             
+            # 检查Google服务是否可用
+            if google_services is None:
+                await update.message.reply_text("⚠️ Google服务未初始化，无法记录支出")
+                if user_id in user_states:
+                    del user_states[user_id]
+                return
+            
             # 添加支出记录
             category = user_states[user_id].get('category')
             amount = user_states[user_id].get('amount')
@@ -446,6 +473,13 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif state == 'income_note':
             note = "" if message_text.lower() in ['无', 'n', 'no', '不需要'] else message_text
             
+            # 检查Google服务是否可用
+            if google_services is None:
+                await update.message.reply_text("⚠️ Google服务未初始化，无法记录收入")
+                if user_id in user_states:
+                    del user_states[user_id]
+                return
+            
             # 添加收入记录
             category = user_states[user_id].get('category')
             amount = user_states[user_id].get('amount')
@@ -471,4 +505,4 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "/income - 记录收入\n"
             "/report - 生成月度报告\n"
             "/help - 获取帮助"
-        ) 
+        )
