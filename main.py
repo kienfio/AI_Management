@@ -4,6 +4,8 @@ from dotenv import load_dotenv
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from handlers import start_handler, help_handler, cancel_command, unknown_command, error_handler
 from google_services import GoogleServices
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # 配置日志
 logging.basicConfig(
@@ -11,6 +13,24 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    """简单的健康检查处理器"""
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b'Bot is running!')
+    
+    def log_message(self, format, *args):
+        # 禁用HTTP服务器日志，避免日志污染
+        pass
+
+def start_health_server(port):
+    """启动健康检查服务器"""
+    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+    logger.info(f"健康检查服务器启动在端口 {port}")
+    server.serve_forever()
 
 def main():
     """主函数，启动Telegram机器人"""
@@ -25,7 +45,10 @@ def main():
     
     # 获取部署环境相关变量
     port = int(os.getenv("PORT", 8080))  # Render会提供PORT环境变量
-    webhook_url = os.getenv("WEBHOOK_URL")  # 你的Render应用URL
+    
+    # 启动健康检查服务器（在后台线程）
+    health_thread = threading.Thread(target=start_health_server, args=(port,), daemon=True)
+    health_thread.start()
     
     # 初始化Google服务
     google_services = GoogleServices()
@@ -53,23 +76,9 @@ def main():
     # 启动机器人
     logger.info("机器人已启动")
     
-    # 判断运行环境
-    if webhook_url:
-        # 生产环境：使用webhook模式
-        logger.info(f"使用webhook模式，端口: {port}")
-        logger.info(f"Webhook URL: {webhook_url}")
-        
-        # 启动webhook服务器
-        application.run_webhook(
-            listen="0.0.0.0",
-            port=port,
-            url_path=token,  # 使用token作为URL路径提高安全性
-            webhook_url=f"{webhook_url}/{token}"
-        )
-    else:
-        # 开发环境：使用polling模式
-        logger.info("使用polling模式")
-        application.run_polling()
+    # 使用polling模式（保持现有工作方式）
+    logger.info("使用polling模式")
+    application.run_polling()
 
 # 仅当直接运行此脚本时执行main函数
 if __name__ == "__main__":
