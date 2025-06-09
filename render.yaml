@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: ai-financial-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
+    envVars:
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: GOOGLE_CREDENTIALS_FILE
+        sync: false
+      - key: SPREADSHEET_ID
+        sync: false
+      - key: DRIVE_FOLDER_ID
+        sync: false 
