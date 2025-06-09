@@ -13,6 +13,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def main():
+    """主函数，启动Telegram机器人"""
     # 加载环境变量
     load_dotenv()
     
@@ -49,5 +50,6 @@ def main():
     logger.info("机器人已启动")
     application.run_polling()
 
+# 仅当直接运行此脚本时执行main函数
 if __name__ == "__main__":
     main() 
