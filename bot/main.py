@@ -18,6 +18,9 @@ from common.shared import logger, update_bot_status
 
 async def run_bot():
     """运行机器人"""
+    application = None
+    loop = None
+    
     try:
         # 创建新的事件循环
         loop = asyncio.new_event_loop()
@@ -53,21 +56,31 @@ async def run_bot():
         )
     except Exception as e:
         logger.error(f"运行机器人时出错: {e}")
-        raise
+        import traceback
+        logger.error(traceback.format_exc())
     finally:
-        # 清理
-        try:
-            if 'application' in locals():
+        # 清理应用
+        if application:
+            try:
+                logger.info("正在关闭Telegram应用...")
                 await application.stop()
                 await application.shutdown()
-        except Exception as e:
-            logger.error(f"关闭机器人时出错: {e}")
+                logger.info("Telegram应用已关闭")
+            except Exception as e:
+                logger.error(f"关闭机器人时出错: {e}")
         
-        # 清理当前循环
-        if 'loop' in locals() and loop and not loop.is_closed():
-            loop.close()
+        # 清理事件循环
+        if loop and not loop.is_closed():
+            try:
+                logger.info("正在关闭事件循环...")
+                loop.stop()
+                loop.close()
+                logger.info("事件循环已关闭")
+            except Exception as e:
+                logger.error(f"关闭事件循环时出错: {e}")
         
         update_bot_status(running=False)
+        logger.info("机器人已停止运行")
 
 if __name__ == '__main__':
     # 直接运行此文件时的入口点
