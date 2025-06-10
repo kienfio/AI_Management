@@ -50,6 +50,38 @@ def register_routes(app):
             "bot_status": get_bot_status()
         })
 
+    @app.route('/debug')
+    def debug_info():
+        """调试信息"""
+        import sys
+        import platform
+        import psutil
+        
+        # 获取进程信息
+        process = psutil.Process()
+        memory_info = process.memory_info()
+        
+        debug_data = {
+            "bot_status": get_bot_status(),
+            "environment": {
+                "python_version": sys.version,
+                "platform": platform.platform(),
+                "cpu_count": psutil.cpu_count(),
+                "memory_usage": {
+                    "rss": memory_info.rss / (1024 * 1024),  # MB
+                    "vms": memory_info.vms / (1024 * 1024)   # MB
+                }
+            },
+            "env_vars": {
+                "PORT": os.environ.get("PORT", "未设置"),
+                "TELEGRAM_TOKEN": os.environ.get("TELEGRAM_TOKEN", "未设置")[:5] + "..." if os.environ.get("TELEGRAM_TOKEN") else "未设置",
+                "GOOGLE_SHEET_ID": os.environ.get("GOOGLE_SHEET_ID", "未设置"),
+                "GOOGLE_DRIVE_FOLDER_ID": os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "未设置")
+            }
+        }
+        
+        return jsonify(debug_data)
+
     @app.errorhandler(404)
     def not_found_error(error):
         """404错误处理"""
