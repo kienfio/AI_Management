@@ -47,14 +47,14 @@ def create_application():
     # 注册命令处理程序
     application.add_handler(CommandHandler("start", start_handler))
     application.add_handler(CommandHandler("help", help_handler))
-    application.add_handler(CommandHandler("add_expense", add_expense_handler))
+    application.add_handler(CommandHandler("SaleInvoice", add_expense_handler))
     application.add_handler(CommandHandler("cancel", cancel_handler))
-    application.add_handler(CommandHandler("categories", categories_handler))
-    application.add_handler(CommandHandler("report", report_handler))
+    application.add_handler(CommandHandler("Categories", categories_handler))
+    application.add_handler(CommandHandler("Report", report_handler))
     
     # 注册设置会话处理器
     settings_conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("settings", settings_handler)],
+        entry_points=[CommandHandler("Settings", settings_handler)],
         states={
             MAIN_MENU: [
                 CallbackQueryHandler(settings_button_handler)
