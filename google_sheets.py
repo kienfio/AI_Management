@@ -12,10 +12,18 @@ from typing import List, Dict, Optional, Any
 import gspread
 import json
 from google.oauth2.service_account import Credentials
-from config import (
-    SHEET_NAMES, SALES_HEADERS, EXPENSES_HEADERS,
-    AGENTS_HEADERS, SUPPLIERS_HEADERS
-)
+# 直接导入常量，避免循环导入
+SHEET_NAMES = {
+    'sales': '销售记录',
+    'expenses': '费用记录', 
+    'agents': '代理商管理',
+    'suppliers': '供应商管理'
+}
+
+SALES_HEADERS = ['日期', '销售人员', '发票金额', '客户类型', '佣金比例', '佣金金额', '备注']
+EXPENSES_HEADERS = ['日期', '费用类型', '供应商', '金额', '类别', '备注']
+AGENTS_HEADERS = ['姓名', '联系人', '电话', '邮箱', '佣金比例', '状态']
+SUPPLIERS_HEADERS = ['供应商名称', '联系人', '电话', '邮箱', '产品/服务', '状态']
 
 logger = logging.getLogger(__name__)
 
