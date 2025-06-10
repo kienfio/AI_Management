@@ -5,7 +5,9 @@ from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
-    filters
+    filters,
+    ConversationHandler,
+    CallbackQueryHandler
 )
 from bot.handlers import (
     start_handler,
@@ -15,8 +17,20 @@ from bot.handlers import (
     cancel_handler,
     categories_handler,
     settings_handler,
+    settings_button_handler,
+    agent_name_handler,
+    agent_ic_handler,
+    supplier_name_handler,
+    supplier_category_handler,
+    personal_name_handler,
     report_handler,
-    error_handler
+    error_handler,
+    MAIN_MENU,
+    WAITING_AGENT_NAME,
+    WAITING_AGENT_IC,
+    WAITING_SUPPLIER_NAME,
+    WAITING_SUPPLIER_CATEGORY,
+    WAITING_PERSONAL_NAME
 )
 from common.shared import logger, update_bot_status
 
@@ -55,8 +69,35 @@ async def setup_webhook():
         application.add_handler(CommandHandler("add_expense", add_expense_handler))
         application.add_handler(CommandHandler("cancel", cancel_handler))
         application.add_handler(CommandHandler("categories", categories_handler))
-        application.add_handler(CommandHandler("settings", settings_handler))
         application.add_handler(CommandHandler("report", report_handler))
+        
+        # 注册设置会话处理器
+        settings_conv_handler = ConversationHandler(
+            entry_points=[CommandHandler("settings", settings_handler)],
+            states={
+                MAIN_MENU: [
+                    CallbackQueryHandler(settings_button_handler)
+                ],
+                WAITING_AGENT_NAME: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, agent_name_handler)
+                ],
+                WAITING_AGENT_IC: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, agent_ic_handler)
+                ],
+                WAITING_SUPPLIER_NAME: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, supplier_name_handler)
+                ],
+                WAITING_SUPPLIER_CATEGORY: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, supplier_category_handler)
+                ],
+                WAITING_PERSONAL_NAME: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, personal_name_handler)
+                ]
+            },
+            fallbacks=[CommandHandler("cancel", cancel_handler)]
+        )
+        application.add_handler(settings_conv_handler)
+        
         application.add_handler(MessageHandler(filters.PHOTO, photo_handler))
         
         # 添加错误处理程序
