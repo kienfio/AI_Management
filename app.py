@@ -1,6 +1,7 @@
 import os
 import threading
 import logging
+import atexit
 from flask import Flask, render_template, jsonify
 from main import main as start_bot
 
@@ -16,6 +17,19 @@ app = Flask(__name__)
 
 # 状态变量
 bot_status = {"running": False, "start_time": None}
+bot_thread = None
+
+def cleanup():
+    """清理函数，确保在应用关闭时正确关闭机器人"""
+    global bot_thread
+    if bot_thread and bot_thread.is_alive():
+        logger.info("正在关闭机器人线程...")
+        # 机器人的关闭逻辑在main.py中的signal handler中处理
+        bot_thread.join(timeout=5)
+        logger.info("机器人线程已关闭")
+
+# 注册清理函数
+atexit.register(cleanup)
 
 # 启动Telegram机器人的线程
 def run_telegram_bot():
@@ -24,6 +38,7 @@ def run_telegram_bot():
         start_bot()
     except Exception as e:
         logger.error(f"启动机器人时出错: {e}")
+        bot_status["running"] = False
 
 # 路由：主页
 @app.route('/')
