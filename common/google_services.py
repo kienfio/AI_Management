@@ -10,6 +10,7 @@ from googleapiclient.http import MediaIoBaseUpload
 from google.oauth2 import service_account
 from tempfile import NamedTemporaryFile
 import logging
+from common.shared import logger
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -185,4 +186,76 @@ class GoogleServices:
             
         except Exception as e:
             logger.error(f"上传文件时出错: {str(e)}")
-            return None 
+            return None
+    
+    def add_agent(self, name, ic):
+        """添加代理商"""
+        try:
+            logger.info(f"添加代理商: 名称={name}, IC={ic}")
+            # 在这里添加将代理商数据写入Google Sheets的代码
+            # 目前仅模拟成功
+            return True
+        except Exception as e:
+            logger.error(f"添加代理商时出错: {e}")
+            return False
+    
+    def add_supplier(self, name, category):
+        """添加供应商"""
+        try:
+            logger.info(f"添加供应商: 名称={name}, 类别={category}")
+            # 在这里添加将供应商数据写入Google Sheets的代码
+            # 目前仅模拟成功
+            return True
+        except Exception as e:
+            logger.error(f"添加供应商时出错: {e}")
+            return False
+    
+    def add_personal(self, name):
+        """添加负责人"""
+        try:
+            logger.info(f"添加负责人: 姓名={name}")
+            # 在这里添加将负责人数据写入Google Sheets的代码
+            # 目前仅模拟成功
+            return True
+        except Exception as e:
+            logger.error(f"添加负责人时出错: {e}")
+            return False
+    
+    def get_agents(self):
+        """获取所有代理商"""
+        try:
+            # 在这里添加从Google Sheets获取代理商数据的代码
+            # 目前仅返回模拟数据
+            return [
+                {"name": "代理商1", "ic": "IC12345"},
+                {"name": "代理商2", "ic": "IC67890"}
+            ]
+        except Exception as e:
+            logger.error(f"获取代理商列表时出错: {e}")
+            return []
+    
+    def get_suppliers(self):
+        """获取所有供应商"""
+        try:
+            # 在这里添加从Google Sheets获取供应商数据的代码
+            # 目前仅返回模拟数据
+            return [
+                {"name": "供应商1", "category": "食品"},
+                {"name": "供应商2", "category": "电子"}
+            ]
+        except Exception as e:
+            logger.error(f"获取供应商列表时出错: {e}")
+            return []
+    
+    def get_personals(self):
+        """获取所有负责人"""
+        try:
+            # 在这里添加从Google Sheets获取负责人数据的代码
+            # 目前仅返回模拟数据
+            return [
+                {"name": "张三"},
+                {"name": "李四"}
+            ]
+        except Exception as e:
+            logger.error(f"获取负责人列表时出错: {e}")
+            return [] 
