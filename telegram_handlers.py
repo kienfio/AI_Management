@@ -27,44 +27,31 @@ SETTINGS_TYPE, SETTINGS_ADD, SETTINGS_EDIT, SETTINGS_DELETE = range(12, 16)
 # ====================================
 # 基础命令区 - /start, /help, /cancel
 # ====================================
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """处理 /start 命令 - 主菜单"""
+    # 检查并关闭其他会话
     await close_other_conversations(update, context)
     
-    # 主菜单按钮配置
-    main_menu_buttons = [
+    keyboard = [
         [InlineKeyboardButton("📊 销售记录", callback_data="menu_sales")],
         [InlineKeyboardButton("💰 费用管理", callback_data="menu_cost")],
         [InlineKeyboardButton("📈 报表生成", callback_data="menu_report")],
         [InlineKeyboardButton("⚙️ 系统设置", callback_data="menu_settings")],
         [InlineKeyboardButton("❓ 帮助说明", callback_data="menu_help")]
     ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
-    reply_markup = InlineKeyboardMarkup(main_menu_buttons)
-    
-    # 欢迎消息文本
-    welcome_text = (
-        "🚀 **财务管理助手**\n\n"
-        "👋 欢迎使用！请选择需要的功能：\n\n"
-        "📊 **销售记录** - 登记发票和佣金\n"
-        "💰 **费用管理** - 记录各项支出\n"
-        "📈 **报表生成** - 查看统计报告\n"
-        "⚙️ **系统设置** - 管理基础信息"
-    )
-    
-    # 发送消息
-    if update.callback_query:
-        await update.callback_query.edit_message_text(
-            text=welcome_text,
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=reply_markup
-        )
-    else:
-        await update.message.reply_text(
-            text=welcome_text,
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=reply_markup
-        )
+    welcome_message = """
+🚀 *财务管理助手*
+
+👋 欢迎使用！请选择需要的功能：
+
+📊 *销售记录* - 登记发票和佣金
+💰 *费用管理* - 记录各项支出
+📈 *报表生成* - 查看统计报告
+⚙️ *系统设置* - 管理基础信息
+    """
     
     if update.callback_query:
         await update.callback_query.edit_message_text(
