@@ -3,8 +3,9 @@ import threading
 import logging
 import atexit
 import time
+import asyncio
 from flask import Flask, render_template, jsonify
-from main import main as start_bot
+from main import run_bot, get_event_loop
 
 # 配置日志
 logging.basicConfig(
@@ -20,42 +21,70 @@ app = Flask(__name__)
 bot_status = {"running": False, "start_time": None, "restart_count": 0}
 bot_thread = None
 bot_lock = threading.Lock()
+event_loop = None
 
 def cleanup():
     """清理函数，确保在应用关闭时正确关闭机器人"""
-    global bot_thread, bot_status
+    global bot_thread, bot_status, event_loop
     with bot_lock:
         if bot_thread and bot_thread.is_alive():
             logger.info("正在关闭机器人线程...")
             bot_status["running"] = False
             bot_thread.join(timeout=5)
             logger.info("机器人线程已关闭")
+        
+        # 清理事件循环
+        if event_loop and not event_loop.is_closed():
+            try:
+                event_loop.stop()
+                event_loop.close()
+            except Exception as e:
+                logger.error(f"关闭事件循环时出错: {e}")
 
 # 注册清理函数
 atexit.register(cleanup)
 
 def run_telegram_bot():
     """运行Telegram机器人的线程函数"""
-    global bot_status
+    global bot_status, event_loop
     try:
         logger.info("正在启动Telegram机器人...")
         with bot_lock:
             bot_status["restart_count"] += 1
-        start_bot()
+            # 创建新的事件循环
+            event_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(event_loop)
+        
+        # 运行机器人
+        event_loop.run_until_complete(run_bot())
     except Exception as e:
         logger.error(f"启动机器人时出错: {e}")
     finally:
         with bot_lock:
             bot_status["running"] = False
+            # 清理事件循环
+            if event_loop and not event_loop.is_closed():
+                try:
+                    event_loop.stop()
+                    event_loop.close()
+                except Exception as e:
+                    logger.error(f"关闭事件循环时出错: {e}")
 
 def ensure_single_instance():
     """确保只有一个机器人实例在运行"""
-    global bot_thread, bot_status
+    global bot_thread, bot_status, event_loop
     with bot_lock:
         # 如果有正在运行的线程，先停止它
         if bot_thread and bot_thread.is_alive():
             logger.info("检测到现有机器人实例，正在停止...")
             bot_status["running"] = False
+            # 停止事件循环
+            if event_loop and not event_loop.is_closed():
+                try:
+                    event_loop.stop()
+                except Exception as e:
+                    logger.error(f"停止事件循环时出错: {e}")
+            # 等待线程结束
             bot_thread.join(timeout=5)
             if bot_thread.is_alive():
                 logger.warning("无法正常停止现有实例")
