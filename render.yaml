@@ -3,7 +3,7 @@ services:
     name: ai-financial-bot
     env: python
     buildCommand: chmod +x ./build.sh && ./build.sh
-    startCommand: python start.py
+    startCommand: gunicorn start:app --bind 0.0.0.0:$PORT
     envVars:
       - key: TELEGRAM_TOKEN
         sync: false
