@@ -1,50 +1,35 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Google Sheets API 集成 - 优化版本
-支持 Render 部署的环境变量配置
+Google Sheets API 集成
+数据存储和同步功能
 """
 
 import logging
-import json
 import os
 from datetime import datetime
 from typing import List, Dict, Optional, Any
 import gspread
+import json
 from google.oauth2.service_account import Credentials
+from config import (
+    SHEET_NAMES, SALES_HEADERS, EXPENSES_HEADERS,
+    AGENTS_HEADERS, SUPPLIERS_HEADERS
+)
 
 logger = logging.getLogger(__name__)
 
-# Telegram Bot 配置
-BOT_TOKEN = os.getenv('TELEGRAM_TOKEN')
-if not BOT_TOKEN:
-    raise ValueError("未设置 TELEGRAM_TOKEN 环境变量")
-
-# 配置常量
-SHEET_NAMES = {
-    'sales': '销售记录',
-    'expenses': '费用记录', 
-    'agents': '代理商管理',
-    'suppliers': '供应商管理'
-}
-
-SALES_HEADERS = ['日期', '销售人员', '发票金额', '客户类型', '佣金比例', '佣金金额', '备注']
-EXPENSES_HEADERS = ['日期', '费用类型', '供应商', '金额', '类别', '备注']
-AGENTS_HEADERS = ['姓名', '联系人', '电话', '邮箱', '佣金比例', '状态']
-SUPPLIERS_HEADERS = ['供应商名称', '联系人', '电话', '邮箱', '产品/服务', '状态']
-
 class GoogleSheetsManager:
-    """Google Sheets 管理器 - 适配 Render 部署环境"""
+    """Google Sheets 管理器"""
     
     def __init__(self):
         self.client = None
         self.spreadsheet = None
         self.spreadsheet_id = None
-        self.folder_id = None
         self._initialize_client()
     
     def _get_credentials(self) -> Credentials:
-        """获取 Google API 凭证 - 适配你的环境变量"""
+        """获取 Google API 凭证 - 支持多种方式"""
         scope = [
             'https://spreadsheets.google.com/feeds',
             'https://www.googleapis.com/auth/drive'
@@ -63,7 +48,7 @@ class GoogleSheetsManager:
             except Exception as e:
                 logger.error(f"❌ 解析 GOOGLE_CREDENTIALS_BASE64 失败: {e}")
         
-        # 方式2: 从 GOOGLE_CREDENTIALS_CONTENT 读取 JSON 内容
+        # 方式2: 从环境变量读取 JSON 字符串
         google_creds_content = os.getenv('GOOGLE_CREDENTIALS_CONTENT')
         if google_creds_content:
             try:
@@ -80,7 +65,7 @@ class GoogleSheetsManager:
             except json.JSONDecodeError as e:
                 logger.error(f"❌ 解析 GOOGLE_CREDENTIALS_CONTENT 失败: {e}")
         
-        # 方式3: 从 GOOGLE_CREDENTIALS_FILE 读取文件路径
+        # 方式3: 从环境变量读取文件路径
         google_creds_file = os.getenv('GOOGLE_CREDENTIALS_FILE')
         if google_creds_file and os.path.exists(google_creds_file):
             logger.info("✅ 使用 GOOGLE_CREDENTIALS_FILE 环境变量")
@@ -96,7 +81,7 @@ class GoogleSheetsManager:
             except json.JSONDecodeError as e:
                 logger.error(f"❌ 解析 GOOGLE_CREDENTIALS_JSON 失败: {e}")
         
-        # 方式5: 默认文件路径 (本地开发)
+        # 方式5: 默认文件路径
         default_paths = [
             'credentials.json',
             'google_credentials.json',
@@ -123,25 +108,14 @@ class GoogleSheetsManager:
             # 获取凭证
             creds = self._get_credentials()
             
-            # 获取表格 ID - 适配你的环境变量名
-            self.spreadsheet_id = os.getenv('GOOGLE_SHEET_ID')  # 注意：你用的是 GOOGLE_SHEET_ID，不是 GOOGLE_SHEETS_ID
+            # 获取表格 ID
+            self.spreadsheet_id = os.getenv('GOOGLE_SHEET_ID')
             if not self.spreadsheet_id:
                 raise ValueError("❌ 未设置 GOOGLE_SHEET_ID 环境变量")
             
-            # 获取 Google Drive 文件夹 ID（可选）
-            self.folder_id = os.getenv('GOOGLE_DRIVE_FOLDER_ID')
-            
             # 创建客户端
             self.client = gspread.authorize(creds)
-            
-            # 尝试打开表格
-            try:
-                self.spreadsheet = self.client.open_by_key(self.spreadsheet_id)
-                logger.info(f"✅ 成功打开表格: {self.spreadsheet.title}")
-            except gspread.SpreadsheetNotFound:
-                logger.error(f"❌ 找不到表格 ID: {self.spreadsheet_id}")
-                logger.error("请检查：1) 表格 ID 是否正确 2) 服务账号是否有访问权限")
-                raise
+            self.spreadsheet = self.client.open_by_key(self.spreadsheet_id)
             
             # 确保所有工作表存在
             self._ensure_worksheets_exist()
@@ -154,79 +128,34 @@ class GoogleSheetsManager:
     
     def _ensure_worksheets_exist(self):
         """确保所有必需的工作表存在"""
-        try:
-            existing_sheets = [ws.title for ws in self.spreadsheet.worksheets()]
-            logger.info(f"📋 现有工作表: {existing_sheets}")
-            
-            # 工作表配置
-            sheet_configs = {
-                'sales': {'name': SHEET_NAMES['sales'], 'headers': SALES_HEADERS},
-                'expenses': {'name': SHEET_NAMES['expenses'], 'headers': EXPENSES_HEADERS},
-                'agents': {'name': SHEET_NAMES['agents'], 'headers': AGENTS_HEADERS},
-                'suppliers': {'name': SHEET_NAMES['suppliers'], 'headers': SUPPLIERS_HEADERS}
-            }
-            
-            # 创建缺失的工作表
-            for sheet_key, config in sheet_configs.items():
-                sheet_name = config['name']
-                if sheet_name not in existing_sheets:
-                    try:
-                        worksheet = self.spreadsheet.add_worksheet(
-                            title=sheet_name, rows=1000, cols=20
-                        )
-                        worksheet.append_row(config['headers'])
-                        logger.info(f"✅ 创建工作表: {sheet_name}")
-                    except Exception as e:
-                        logger.error(f"❌ 创建工作表失败 {sheet_name}: {e}")
-                else:
-                    logger.info(f"📋 工作表已存在: {sheet_name}")
-                    
-        except Exception as e:
-            logger.error(f"❌ 检查工作表失败: {e}")
+        existing_sheets = [ws.title for ws in self.spreadsheet.worksheets()]
+        
+        # 创建缺失的工作表
+        for sheet_key, sheet_name in SHEET_NAMES.items():
+            if sheet_name not in existing_sheets:
+                worksheet = self.spreadsheet.add_worksheet(
+                    title=sheet_name, rows=1000, cols=20
+                )
+                
+                # 添加表头
+                if sheet_key == 'sales':
+                    worksheet.append_row(SALES_HEADERS)
+                elif sheet_key == 'expenses':
+                    worksheet.append_row(EXPENSES_HEADERS)
+                elif sheet_key == 'agents':
+                    worksheet.append_row(AGENTS_HEADERS)
+                elif sheet_key == 'suppliers':
+                    worksheet.append_row(SUPPLIERS_HEADERS)
+                
+                logger.info(f"✅ 创建工作表: {sheet_name}")
     
     def get_worksheet(self, sheet_name: str):
         """获取指定工作表"""
         try:
             return self.spreadsheet.worksheet(sheet_name)
-        except gspread.WorksheetNotFound:
-            logger.error(f"❌ 工作表不存在: {sheet_name}")
-            return None
         except Exception as e:
             logger.error(f"❌ 获取工作表失败 {sheet_name}: {e}")
             return None
-    
-    def test_connection(self) -> Dict[str, Any]:
-        """测试连接状态和配置信息"""
-        try:
-            sheets = [ws.title for ws in self.spreadsheet.worksheets()]
-            
-            # 收集环境变量状态
-            env_status = {
-                'GOOGLE_SHEET_ID': '✅' if os.getenv('GOOGLE_SHEET_ID') else '❌',
-                'GOOGLE_CREDENTIALS_CONTENT': '✅' if os.getenv('GOOGLE_CREDENTIALS_CONTENT') else '❌',
-                'GOOGLE_CREDENTIALS_FILE': '✅' if os.getenv('GOOGLE_CREDENTIALS_FILE') else '❌',
-                'GOOGLE_DRIVE_FOLDER_ID': '✅' if os.getenv('GOOGLE_DRIVE_FOLDER_ID') else '❌',
-                'TELEGRAM_TOKEN': '✅' if os.getenv('TELEGRAM_TOKEN') else '❌',
-                'SERVICE_URL': '✅' if os.getenv('SERVICE_URL') else '❌',
-                'DEBUG': os.getenv('DEBUG', 'False'),
-                'PORT': os.getenv('PORT', '5000')
-            }
-            
-            return {
-                'success': True,
-                'spreadsheet_id': self.spreadsheet_id,
-                'spreadsheet_title': self.spreadsheet.title,
-                'folder_id': self.folder_id,
-                'worksheets': sheets,
-                'env_status': env_status,
-                'message': '✅ 连接成功，所有配置正常'
-            }
-        except Exception as e:
-            return {
-                'success': False,
-                'error': str(e),
-                'message': f'❌ 连接失败: {e}'
-            }
     
     # =============================================================================
     # 销售记录操作
