@@ -1,6 +1,14 @@
 import os
+import logging
 from flask import jsonify, render_template
 from multiprocessing import Manager
+
+# 配置日志
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 # 创建进程安全的状态管理器
 manager = Manager()
