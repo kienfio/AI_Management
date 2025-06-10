@@ -47,7 +47,7 @@ class BotManager:
             bot_main = importlib.import_module('bot.main')
             run_bot = getattr(bot_main, 'run_bot')
             
-            # 运行机器人
+            # 运行机器人 - 正确处理异步协程
             cls._event_loop.run_until_complete(run_bot())
         except Exception as e:
             logger.error(f"启动机器人时出错: {e}")
