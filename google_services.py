@@ -31,19 +31,20 @@ class GoogleServices:
         try:
             # 获取凭证内容
             credentials_content = os.getenv('GOOGLE_CREDENTIALS_CONTENT')
-            self.spreadsheet_id = os.getenv('SPREADSHEET_ID')
-            self.drive_folder_id = os.getenv('DRIVE_FOLDER_ID')
+            credentials_file = os.getenv('GOOGLE_CREDENTIALS_FILE')
+            self.spreadsheet_id = os.getenv('GOOGLE_SHEET_ID')
+            self.drive_folder_id = os.getenv('GOOGLE_DRIVE_FOLDER_ID')
             
             # 检查必要的配置是否存在
-            if not all([credentials_content, self.spreadsheet_id, self.drive_folder_id]):
+            if not any([credentials_content, credentials_file]) or not all([self.spreadsheet_id, self.drive_folder_id]):
                 if required:
                     missing = []
-                    if not credentials_content:
-                        missing.append("GOOGLE_CREDENTIALS_CONTENT")
+                    if not any([credentials_content, credentials_file]):
+                        missing.append("GOOGLE_CREDENTIALS_CONTENT 或 GOOGLE_CREDENTIALS_FILE")
                     if not self.spreadsheet_id:
-                        missing.append("SPREADSHEET_ID")
+                        missing.append("GOOGLE_SHEET_ID")
                     if not self.drive_folder_id:
-                        missing.append("DRIVE_FOLDER_ID")
+                        missing.append("GOOGLE_DRIVE_FOLDER_ID")
                     raise ValueError(f"缺少必要的环境变量: {', '.join(missing)}")
                 else:
                     logger.warning("Google服务配置不完整，某些功能将不可用")
@@ -56,9 +57,15 @@ class GoogleServices:
             ]
             
             # 初始化服务
-            credentials_dict = json.loads(credentials_content)
-            credentials = service_account.Credentials.from_service_account_info(
-                credentials_dict, scopes=self.scopes)
+            if credentials_content:
+                # 从环境变量内容初始化
+                credentials_dict = json.loads(credentials_content)
+                credentials = service_account.Credentials.from_service_account_info(
+                    credentials_dict, scopes=self.scopes)
+            else:
+                # 从文件初始化
+                credentials = service_account.Credentials.from_service_account_file(
+                    credentials_file, scopes=self.scopes)
             
             self.sheets_service = build('sheets', 'v4', credentials=credentials)
             self.drive_service = build('drive', 'v3', credentials=credentials)
