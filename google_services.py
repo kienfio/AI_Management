@@ -16,60 +16,87 @@ logger = logging.getLogger(__name__)
 class GoogleServices:
     """处理与Google服务（Sheets和Drive）的所有交互"""
     
-    def __init__(self):
+    def __init__(self, required=False):
+        """
+        初始化Google服务
+        :param required: 如果为True，则缺少配置时抛出异常；如果为False，则仅记录警告
+        """
+        self.is_available = False
+        self.sheets_service = None
+        self.drive_service = None
+        
         # 加载环境变量
         load_dotenv()
         
-        # 获取凭证文件路径或内容
-        credentials_content = os.getenv('GOOGLE_CREDENTIALS_CONTENT')
-        if not credentials_content:
-            raise ValueError("未找到 GOOGLE_CREDENTIALS_CONTENT 环境变量")
-            
-        self.spreadsheet_id = os.getenv('SPREADSHEET_ID')
-        if not self.spreadsheet_id:
-            raise ValueError("未找到 SPREADSHEET_ID 环境变量")
-            
-        self.drive_folder_id = os.getenv('DRIVE_FOLDER_ID')
-        if not self.drive_folder_id:
-            raise ValueError("未找到 DRIVE_FOLDER_ID 环境变量")
-        
-        # 定义所需权限
-        self.scopes = [
-            'https://www.googleapis.com/auth/spreadsheets',
-            'https://www.googleapis.com/auth/drive'
-        ]
-        
         try:
-            # 从环境变量中加载凭证内容
+            # 获取凭证内容
+            credentials_content = os.getenv('GOOGLE_CREDENTIALS_CONTENT')
+            self.spreadsheet_id = os.getenv('SPREADSHEET_ID')
+            self.drive_folder_id = os.getenv('DRIVE_FOLDER_ID')
+            
+            # 检查必要的配置是否存在
+            if not all([credentials_content, self.spreadsheet_id, self.drive_folder_id]):
+                if required:
+                    missing = []
+                    if not credentials_content:
+                        missing.append("GOOGLE_CREDENTIALS_CONTENT")
+                    if not self.spreadsheet_id:
+                        missing.append("SPREADSHEET_ID")
+                    if not self.drive_folder_id:
+                        missing.append("DRIVE_FOLDER_ID")
+                    raise ValueError(f"缺少必要的环境变量: {', '.join(missing)}")
+                else:
+                    logger.warning("Google服务配置不完整，某些功能将不可用")
+                    return
+            
+            # 定义所需权限
+            self.scopes = [
+                'https://www.googleapis.com/auth/spreadsheets',
+                'https://www.googleapis.com/auth/drive'
+            ]
+            
+            # 初始化服务
             credentials_dict = json.loads(credentials_content)
             credentials = service_account.Credentials.from_service_account_info(
                 credentials_dict, scopes=self.scopes)
             
-            # 初始化服务
             self.sheets_service = build('sheets', 'v4', credentials=credentials)
             self.drive_service = build('drive', 'v3', credentials=credentials)
             
             # 验证电子表格访问
             self.verify_spreadsheet_access()
             
+            self.is_available = True
+            logger.info("Google服务初始化成功")
+            
         except Exception as e:
-            logger.error(f"初始化Google服务时出错: {str(e)}")
-            raise
+            if required:
+                logger.error(f"初始化Google服务时出错: {str(e)}")
+                raise
+            else:
+                logger.warning(f"Google服务初始化失败，某些功能将不可用: {str(e)}")
     
     def verify_spreadsheet_access(self):
         """验证是否可以访问电子表格"""
+        if not self.is_available:
+            return False
+            
         try:
-            # 尝试获取电子表格的基本信息
             self.sheets_service.spreadsheets().get(
                 spreadsheetId=self.spreadsheet_id
             ).execute()
             logger.info("成功验证电子表格访问权限")
+            return True
         except Exception as e:
             logger.error(f"验证电子表格访问时出错: {str(e)}")
-            raise
+            return False
     
     def add_expense(self, date, category, amount, description, note='', receipt_url=''):
         """添加支出记录到Google Sheet"""
+        if not self.is_available:
+            logger.warning("Google服务未正确初始化，无法添加支出记录")
+            return False
+            
         try:
             values = [[date, category, amount, description, note, receipt_url]]
             
@@ -104,6 +131,10 @@ class GoogleServices:
     
     def upload_file(self, file_path, file_name=None):
         """上传文件到Google Drive指定文件夹"""
+        if not self.is_available:
+            logger.warning("Google服务未正确初始化，无法上传文件")
+            return None
+            
         try:
             if not file_name:
                 file_name = os.path.basename(file_path)
