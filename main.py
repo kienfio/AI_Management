@@ -2,6 +2,7 @@ import os
 import logging
 import time
 import signal
+import asyncio
 from dotenv import load_dotenv
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ConversationHandler
 from handlers import (start_handler, help_handler, settings_handler, cancel_command, 
@@ -21,12 +22,13 @@ logger = logging.getLogger(__name__)
 # 全局应用实例
 application = None
 
-def shutdown_handler(signum, frame):
+async def shutdown_handler(signum, frame):
     """处理程序关闭信号"""
+    global application
     logger.info(f"收到信号 {signum}，正在关闭...")
     if application:
         application.stop()
-        application.shutdown()
+        await application.shutdown()
     logger.info("机器人已关闭")
 
 def main():
@@ -46,7 +48,7 @@ def main():
         # 确保之前的连接已经关闭
         if application:
             application.stop()
-            application.shutdown()
+            asyncio.run(application.shutdown())
             application = None
             logger.info("已关闭之前的应用实例")
             time.sleep(2)  # 等待之前的连接完全关闭
@@ -101,8 +103,8 @@ def main():
         application.add_error_handler(error_handler)
         
         # 设置信号处理
-        signal.signal(signal.SIGINT, shutdown_handler)
-        signal.signal(signal.SIGTERM, shutdown_handler)
+        signal.signal(signal.SIGINT, lambda s, f: asyncio.run(shutdown_handler(s, f)))
+        signal.signal(signal.SIGTERM, lambda s, f: asyncio.run(shutdown_handler(s, f)))
         
         # 启动机器人
         logger.info("机器人正在启动...")
@@ -119,7 +121,7 @@ def main():
         if application:
             try:
                 application.stop()
-                application.shutdown()
+                asyncio.run(application.shutdown())
                 logger.info("机器人已正确关闭")
             except Exception as e:
                 logger.error(f"关闭机器人时出错: {e}")
