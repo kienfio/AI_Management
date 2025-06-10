@@ -56,11 +56,12 @@ def main():
         # 创建新的应用实例
         application = Application.builder().token(token).build()
         
-        # 初始化Google服务
+        # 初始化Google服务（设置为非必需）
         try:
-            google_services = GoogleServices()
+            google_services = GoogleServices(required=False)
         except Exception as e:
-            logger.error(f"初始化Google服务时出错: {e}")
+            logger.warning(f"Google服务初始化失败，某些功能可能不可用: {e}")
+            google_services = None
         
         # 添加对话处理器 - 设置功能
         settings_conv_handler = ConversationHandler(
@@ -77,7 +78,8 @@ def main():
             },
             fallbacks=[CommandHandler("cancel", cancel_command)],
             name="settings_conversation",
-            persistent=False
+            persistent=False,
+            per_message=True  # 添加这个参数
         )
         
         # 添加命令处理器
