@@ -63,13 +63,14 @@ async def run_bot():
     finally:
         # 清理
         try:
-            await application.stop()
-            await application.shutdown()
+            if 'application' in locals():
+                await application.stop()
+                await application.shutdown()
         except Exception as e:
             logger.error(f"关闭机器人时出错: {e}")
         
         # 清理当前循环
-        if loop and not loop.is_closed():
+        if 'loop' in locals() and loop and not loop.is_closed():
             loop.close()
 
 if __name__ == '__main__':
