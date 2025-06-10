@@ -3,12 +3,14 @@
 """
 销售管理 Telegram Bot
 主程序入口 - Bot 启动和配置
+支持Webhook模式部署
 """
 
 import logging
 import os
 import base64
 import json
+import sys
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 
 def test_credentials():
@@ -85,9 +87,25 @@ def main():
     # 确保错误处理器已注册
     application.add_error_handler(error_handler)
     
-    # 启动 Bot
-    logger.info("🚀 销售管理 Bot 启动中...")
-    application.run_polling(allowed_updates=["message", "callback_query"])
+    # 获取环境变量
+    port = int(os.environ.get("PORT", 8080))
+    webhook_url = os.environ.get("WEBHOOK_URL")
+    
+    # 如果设置了webhook_url，使用webhook模式，否则使用轮询模式
+    if webhook_url:
+        # Webhook模式
+        logger.info(f"🚀 销售管理 Bot 启动中 (Webhook模式)...")
+        application.run_webhook(
+            listen="0.0.0.0",
+            port=port,
+            url_path=BOT_TOKEN,
+            webhook_url=f"{webhook_url}/{BOT_TOKEN}",
+            allowed_updates=["message", "callback_query"]
+        )
+    else:
+        # 轮询模式 (本地开发)
+        logger.info("🚀 销售管理 Bot 启动中 (轮询模式)...")
+        application.run_polling(allowed_updates=["message", "callback_query"])
 
 if __name__ == '__main__':
     main()
