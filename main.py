@@ -22,6 +22,16 @@ logger = logging.getLogger(__name__)
 
 # 全局应用实例
 application = None
+loop = None
+
+def get_event_loop():
+    """获取或创建事件循环"""
+    try:
+        return asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return loop
 
 async def cleanup_webhook():
     """清理webhook设置"""
@@ -36,7 +46,7 @@ async def cleanup_webhook():
 
 async def shutdown_handler(signum, frame):
     """处理程序关闭信号"""
-    global application
+    global application, loop
     logger.info(f"收到信号 {signum}，正在关闭...")
     if application:
         try:
@@ -59,12 +69,14 @@ async def shutdown_handler(signum, frame):
 
 def register_shutdown_handlers():
     """注册关闭处理程序"""
+    loop = get_event_loop()
+    
     # 注册信号处理
     for sig in (signal.SIGINT, signal.SIGTERM):
-        signal.signal(sig, lambda s, f: asyncio.run(shutdown_handler(s, f)))
+        loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(shutdown_handler(s, None)))
     
     # 注册退出处理
-    atexit.register(lambda: asyncio.run(cleanup_webhook()))
+    atexit.register(lambda: loop.run_until_complete(cleanup_webhook()))
 
 async def initialize_bot(token):
     """初始化机器人"""
@@ -130,8 +142,8 @@ async def initialize_bot(token):
         logger.error(f"初始化机器人时出错: {e}")
         return False
 
-def main():
-    """主函数，启动Telegram机器人"""
+async def run_bot():
+    """运行机器人的异步函数"""
     # 加载环境变量
     load_dotenv()
     
@@ -146,13 +158,13 @@ def main():
         register_shutdown_handlers()
         
         # 初始化机器人
-        if not asyncio.run(initialize_bot(token)):
+        if not await initialize_bot(token):
             logger.error("机器人初始化失败")
             return
         
         # 启动机器人
         logger.info("机器人正在启动...")
-        application.run_polling(
+        await application.run_polling(
             allowed_updates=["message", "callback_query", "chat_member"],
             drop_pending_updates=True,
             close_loop=False
@@ -164,9 +176,27 @@ def main():
         # 确保应用程序正确关闭
         if application:
             try:
-                asyncio.run(shutdown_handler(signal.SIGTERM, None))
+                await shutdown_handler(signal.SIGTERM, None)
             except Exception as e:
                 logger.error(f"关闭机器人时出错: {e}")
+
+def main():
+    """主函数入口"""
+    global loop
+    try:
+        # 获取或创建事件循环
+        loop = get_event_loop()
+        # 运行机器人
+        loop.run_until_complete(run_bot())
+    except Exception as e:
+        logger.error(f"主循环错误: {e}")
+    finally:
+        try:
+            # 清理事件循环
+            if loop and not loop.is_closed():
+                loop.close()
+        except Exception as e:
+            logger.error(f"关闭事件循环时出错: {e}")
 
 if __name__ == "__main__":
     main()
