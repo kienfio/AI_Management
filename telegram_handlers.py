@@ -395,7 +395,7 @@ async def cost_amount_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await update.message.reply_text(
-            f"💰 金额：¥{amount:,.2f}\n\n📝 请输入备注说明（可选，直接发送"跳过"）：",
+            f"💰 金额：¥{amount:,.2f}\n\n📝 请输入备注说明（可选，直接发送\"跳过\"）：",
             reply_markup=reply_markup
         )
         return COST_DESC
