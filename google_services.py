@@ -8,6 +8,10 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from google.oauth2 import service_account
 from tempfile import NamedTemporaryFile
+import logging
+
+# 配置日志
+logger = logging.getLogger(__name__)
 
 class GoogleServices:
     """处理与Google服务（Sheets和Drive）的所有交互"""
@@ -17,10 +21,17 @@ class GoogleServices:
         load_dotenv()
         
         # 获取凭证文件路径或内容
-        credentials_file = os.getenv('GOOGLE_CREDENTIALS_FILE')
         credentials_content = os.getenv('GOOGLE_CREDENTIALS_CONTENT')
+        if not credentials_content:
+            raise ValueError("未找到 GOOGLE_CREDENTIALS_CONTENT 环境变量")
+            
         self.spreadsheet_id = os.getenv('SPREADSHEET_ID')
+        if not self.spreadsheet_id:
+            raise ValueError("未找到 SPREADSHEET_ID 环境变量")
+            
         self.drive_folder_id = os.getenv('DRIVE_FOLDER_ID')
+        if not self.drive_folder_id:
+            raise ValueError("未找到 DRIVE_FOLDER_ID 环境变量")
         
         # 定义所需权限
         self.scopes = [
@@ -28,97 +39,34 @@ class GoogleServices:
             'https://www.googleapis.com/auth/drive'
         ]
         
-        # 加载凭证
         try:
-            # 尝试从环境变量内容获取凭证
-            if credentials_content:
-                # 从环境变量加载凭证内容
-                credentials_dict = json.loads(credentials_content)
-                
-                # 创建临时文件以供google-auth库使用
-                self.temp_file = NamedTemporaryFile(delete=False)
-                with open(self.temp_file.name, 'w') as tmp:
-                    json.dump(credentials_dict, tmp)
-                
-                # 使用临时文件路径加载凭证
-                self.credentials = service_account.Credentials.from_service_account_file(
-                    self.temp_file.name, scopes=self.scopes
-                )
-                
-                # 清理临时文件
-                os.unlink(self.temp_file.name)
-                
-            # 如果没有环境变量内容，尝试从文件读取
-            elif credentials_file:
-                self.credentials = service_account.Credentials.from_service_account_file(
-                    credentials_file, scopes=self.scopes
-                )
-            else:
-                raise ValueError("未提供Google凭证，请设置GOOGLE_CREDENTIALS_FILE或GOOGLE_CREDENTIALS_CONTENT环境变量")
+            # 从环境变量中加载凭证内容
+            credentials_dict = json.loads(credentials_content)
+            credentials = service_account.Credentials.from_service_account_info(
+                credentials_dict, scopes=self.scopes)
             
             # 初始化服务
-            self.sheets_service = build('sheets', 'v4', credentials=self.credentials)
-            self.drive_service = build('drive', 'v3', credentials=self.credentials)
+            self.sheets_service = build('sheets', 'v4', credentials=credentials)
+            self.drive_service = build('drive', 'v3', credentials=credentials)
             
-            # 检查并创建必要的工作表
-            self._setup_sheets()
+            # 验证电子表格访问
+            self.verify_spreadsheet_access()
             
         except Exception as e:
-            print(f"初始化Google服务时出错: {e}")
+            logger.error(f"初始化Google服务时出错: {str(e)}")
+            raise
     
-    def _setup_sheets(self):
-        """检查并创建必要的工作表"""
+    def verify_spreadsheet_access(self):
+        """验证是否可以访问电子表格"""
         try:
-            # 获取现有工作表
-            sheet_metadata = self.sheets_service.spreadsheets().get(spreadsheetId=self.spreadsheet_id).execute()
-            sheets = sheet_metadata.get('sheets', [])
-            
-            # 提取工作表名称
-            sheet_names = [sheet['properties']['title'] for sheet in sheets]
-            
-            # 检查并创建支出工作表
-            if '支出' not in sheet_names:
-                self._create_sheet('支出', ['日期', '类别', '金额', '描述', '备注', '收据链接'])
-            
-            # 检查并创建收入工作表
-            if '收入' not in sheet_names:
-                self._create_sheet('收入', ['日期', '类别', '金额', '描述', '备注'])
-            
-        except Exception as e:
-            print(f"设置工作表时出错: {e}")
-    
-    def _create_sheet(self, sheet_name, headers):
-        """创建新工作表并添加表头"""
-        try:
-            # 创建新工作表
-            body = {
-                'requests': [{
-                    'addSheet': {
-                        'properties': {
-                            'title': sheet_name
-                        }
-                    }
-                }]
-            }
-            self.sheets_service.spreadsheets().batchUpdate(
-                spreadsheetId=self.spreadsheet_id,
-                body=body
+            # 尝试获取电子表格的基本信息
+            self.sheets_service.spreadsheets().get(
+                spreadsheetId=self.spreadsheet_id
             ).execute()
-            
-            # 添加表头
-            range_name = f'{sheet_name}!A1:{chr(65 + len(headers) - 1)}1'
-            body = {
-                'values': [headers]
-            }
-            self.sheets_service.spreadsheets().values().update(
-                spreadsheetId=self.spreadsheet_id,
-                range=range_name,
-                valueInputOption='USER_ENTERED',
-                body=body
-            ).execute()
-            
+            logger.info("成功验证电子表格访问权限")
         except Exception as e:
-            print(f"创建工作表 {sheet_name} 时出错: {e}")
+            logger.error(f"验证电子表格访问时出错: {str(e)}")
+            raise
     
     def add_expense(self, date, category, amount, description, note='', receipt_url=''):
         """添加支出记录到Google Sheet"""
@@ -147,11 +95,42 @@ class GoogleServices:
                 body=body
             ).execute()
             
+            logger.info(f"成功添加支出记录: {values}")
             return True
             
         except Exception as e:
-            print(f"添加支出记录时出错: {e}")
+            logger.error(f"添加支出记录时出错: {str(e)}")
             return False
+    
+    def upload_file(self, file_path, file_name=None):
+        """上传文件到Google Drive指定文件夹"""
+        try:
+            if not file_name:
+                file_name = os.path.basename(file_path)
+            
+            file_metadata = {
+                'name': file_name,
+                'parents': [self.drive_folder_id]
+            }
+            
+            media = MediaIoBaseUpload(
+                io.BytesIO(open(file_path, 'rb').read()),
+                mimetype='application/octet-stream',
+                resumable=True
+            )
+            
+            file = self.drive_service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id, webViewLink'
+            ).execute()
+            
+            logger.info(f"成功上传文件: {file_name}")
+            return file.get('webViewLink')
+            
+        except Exception as e:
+            logger.error(f"上传文件时出错: {str(e)}")
+            return None
     
     def add_income(self, date, category, amount, description, note=''):
         """添加收入记录到Google Sheet"""
