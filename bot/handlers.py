@@ -14,9 +14,9 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"收到/start命令，来自用户ID: {update.effective_user.id}, 用户名: {update.effective_user.username}")
     
     welcome_message = """
-🚀 *财务管理助手*
+🚀 <b>财务管理助手</b>
 
-📋 *快速开始*
+📋 <b>快速开始</b>
 ┣ 📊 /add_expense — 添加支出
 ┣ 💰 /categories — 支出类别  
 ┣ ⚙️ /settings — 系统配置
@@ -25,7 +25,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 💡 /help 详细说明 | ❌ /cancel 取消操作
     """
     
-    await update.message.reply_text(welcome_message, parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(welcome_message, parse_mode=ParseMode.HTML)
     logger.info(f"已回复/start命令，用户ID: {update.effective_user.id}")
 
 async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -33,34 +33,34 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"收到/help命令，来自用户ID: {update.effective_user.id}")
     
     help_message = """
-📖 *使用指南*
+📖 <b>使用指南</b>
 
-🔧 *基础命令*
+🔧 <b>基础命令</b>
 • /start — 主菜单
 • /help — 帮助说明
 • /cancel — 取消当前操作
 
-📊 *添加支出* (/add_expense)
+📊 <b>添加支出</b> (/add_expense)
 • 格式: /add_expense 日期 类别 金额 描述 [备注]
-• 例如: `/add_expense 2024-06-10 餐饮 50 午餐`
+• 例如: <code>/add_expense 2024-06-10 餐饮 50 午餐</code>
 • 支持上传收据照片
 
-💰 *支出类别* (/categories)
+💰 <b>支出类别</b> (/categories)
 • 查看所有可用类别
 • 餐饮、交通、购物等
 
-⚙️ *系统配置* (/settings)
+⚙️ <b>系统配置</b> (/settings)
 • 查看当前配置
 • 修改默认设置
 
-📈 *报表功能* (/report)
+📈 <b>报表功能</b> (/report)
 • 生成当月报表
-• 指定月份查询 `/report 2024-06`
+• 指定月份查询 <code>/report 2024-06</code>
 
-💡 *小贴士：直接发送收据照片，系统会自动处理*
+💡 <b>小贴士：直接发送收据照片，系统会自动处理</b>
     """
     
-    await update.message.reply_text(help_message, parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(help_message, parse_mode=ParseMode.HTML)
     logger.info(f"已回复/help命令，用户ID: {update.effective_user.id}")
 
 async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -79,8 +79,8 @@ async def add_expense_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         if len(context.args) < 4:
             logger.warning(f"参数不足，用户ID: {update.effective_user.id}")
             await update.message.reply_text(
-                "⚠️ *参数不足*\n\n请使用以下格式：\n`/add_expense 日期 类别 金额 描述 [备注]`\n例如：`/add_expense 2024-06-10 餐饮 50 午餐`",
-                parse_mode=ParseMode.MARKDOWN
+                "⚠️ <b>参数不足</b>\n\n请使用以下格式：\n<code>/add_expense 日期 类别 金额 描述 [备注]</code>\n例如：<code>/add_expense 2024-06-10 餐饮 50 午餐</code>",
+                parse_mode=ParseMode.HTML
             )
             return
 
@@ -98,17 +98,17 @@ async def add_expense_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             logger.info(f"支出记录添加成功，用户ID: {update.effective_user.id}")
             
             success_message = f"""
-✅ *支出记录已添加*
+✅ <b>支出记录已添加</b>
 
-📅 日期：`{date}`
-🏷️ 类别：`{category}`
-💰 金额：`{amount}`
-📝 描述：`{description}`
+📅 日期：<code>{date}</code>
+🏷️ 类别：<code>{category}</code>
+💰 金额：<code>{amount}</code>
+📝 描述：<code>{description}</code>
 """
             if note:
-                success_message += f"📌 备注：`{note}`"
+                success_message += f"📌 备注：<code>{note}</code>"
                 
-            await update.message.reply_text(success_message, parse_mode=ParseMode.MARKDOWN)
+            await update.message.reply_text(success_message, parse_mode=ParseMode.HTML)
         else:
             logger.error(f"支出记录添加失败，用户ID: {update.effective_user.id}")
             await update.message.reply_text("❌ 添加支出记录失败，请稍后重试")
@@ -142,16 +142,16 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.info(f"照片上传成功，URL: {file_url}")
                 
                 success_message = f"""
-📸 *收据已上传成功*
+📸 <b>收据已上传成功</b>
 
 请使用 /add_expense 命令添加支出记录：
-`/add_expense 日期 类别 金额 描述 收据链接`
+<code>/add_expense 日期 类别 金额 描述 收据链接</code>
 
 例如：
-`/add_expense 2024-06-10 餐饮 50 午餐 {file_url}`
+<code>/add_expense 2024-06-10 餐饮 50 午餐 {file_url}</code>
 """
                 
-                await update.message.reply_text(success_message, parse_mode=ParseMode.MARKDOWN)
+                await update.message.reply_text(success_message, parse_mode=ParseMode.HTML)
             else:
                 logger.error(f"照片上传失败，用户ID: {update.effective_user.id}")
                 await update.message.reply_text("❌ 收据上传失败，请稍后重试")
@@ -171,7 +171,7 @@ async def categories_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     logger.info(f"收到/categories命令，来自用户ID: {update.effective_user.id}")
     
     categories_message = """
-📋 *支出类别列表*
+📋 <b>支出类别列表</b>
 
 • 🍔 餐饮 - 餐厅、外卖、咖啡等
 • 🚌 交通 - 公交、地铁、打车等
@@ -183,10 +183,10 @@ async def categories_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 • 📱 通讯 - 话费、网费等
 • 🔧 其他 - 未分类支出
 
-使用 `/add_expense` 命令时请使用以上类别
+使用 <code>/add_expense</code> 命令时请使用以上类别
 """
     
-    await update.message.reply_text(categories_message, parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(categories_message, parse_mode=ParseMode.HTML)
     logger.info(f"已回复/categories命令，用户ID: {update.effective_user.id}")
 
 async def settings_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -194,7 +194,7 @@ async def settings_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"收到/settings命令，来自用户ID: {update.effective_user.id}")
     
     settings_message = """
-⚙️ *系统设置*
+⚙️ <b>系统设置</b>
 
 当前配置:
 • 📊 数据同步: Google Sheets
@@ -202,10 +202,10 @@ async def settings_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • 🔔 提醒功能: 已禁用
 • 📅 报表周期: 月度
 
-*功能开发中，敬请期待...*
+<b>功能开发中，敬请期待...</b>
 """
     
-    await update.message.reply_text(settings_message, parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(settings_message, parse_mode=ParseMode.HTML)
     logger.info(f"已回复/settings命令，用户ID: {update.effective_user.id}")
 
 async def report_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -213,9 +213,9 @@ async def report_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"收到/report命令，来自用户ID: {update.effective_user.id}")
     
     report_message = """
-📊 *报表功能*
+📊 <b>报表功能</b>
 
-*功能开发中，敬请期待...*
+<b>功能开发中，敬请期待...</b>
 
 将支持:
 • 📅 按月份生成报表
@@ -224,7 +224,7 @@ async def report_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • 📑 自定义报表导出
 """
     
-    await update.message.reply_text(report_message, parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(report_message, parse_mode=ParseMode.HTML)
     logger.info(f"已回复/report命令，用户ID: {update.effective_user.id}")
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
