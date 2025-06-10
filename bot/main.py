@@ -1,5 +1,4 @@
 import os
-import logging
 import asyncio
 from telegram import Update
 from telegram.ext import (
@@ -15,13 +14,7 @@ from bot.handlers import (
     photo_handler,
     error_handler
 )
-
-# 配置日志
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+from common.shared import logger, update_bot_status
 
 async def run_bot():
     """运行机器人"""
@@ -48,6 +41,7 @@ async def run_bot():
         application.add_error_handler(error_handler)
         
         logger.info("机器人初始化成功")
+        update_bot_status(running=True)
         
         # 使用当前事件循环运行机器人
         await application.initialize()
@@ -72,6 +66,8 @@ async def run_bot():
         # 清理当前循环
         if 'loop' in locals() and loop and not loop.is_closed():
             loop.close()
+        
+        update_bot_status(running=False)
 
 if __name__ == '__main__':
     # 直接运行此文件时的入口点
