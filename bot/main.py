@@ -75,4 +75,7 @@ async def run_bot():
 
 if __name__ == '__main__':
     # 直接运行此文件时的入口点
-    asyncio.run(run_bot()) 
+    asyncio.run(run_bot())
+
+# 明确导出的函数
+__all__ = ['run_bot'] 
