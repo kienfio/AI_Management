@@ -43,24 +43,30 @@ def run_telegram_bot():
 # 路由：主页
 @app.route('/')
 def index():
+    port = os.environ.get('PORT', 5000)
     return jsonify({
         "status": "running",
-        "message": "AI财务管理机器人服务已启动"
+        "message": "AI财务管理机器人服务已启动",
+        "port": port,
+        "bot_status": bot_status
     })
 
 # 路由：状态检查
 @app.route('/status')
 def status():
+    port = os.environ.get('PORT', 5000)
     return jsonify({
         "bot_status": bot_status,
-        "service": "running"
+        "service": "running",
+        "port": port
     })
 
 # 路由：健康检查
 @app.route('/health')
 def health():
     return jsonify({
-        "status": "healthy"
+        "status": "healthy",
+        "port": os.environ.get('PORT', 5000)
     })
 
 # 启动机器人线程
@@ -72,10 +78,12 @@ if not bot_status["running"]:
     import datetime
     bot_status["start_time"] = datetime.datetime.now().isoformat()
     logger.info("机器人后台线程已启动")
+    
+# 记录端口信息
+port = os.environ.get('PORT', 5000)
+logger.info(f"Flask应用准备在端口 {port} 上启动")
 
 # 主程序入口
 if __name__ == '__main__':
-    # 获取端口
-    port = int(os.environ.get('PORT', 5000))
     # 启动Web服务
     app.run(host='0.0.0.0', port=port) 
