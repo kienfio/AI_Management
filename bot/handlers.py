@@ -30,10 +30,10 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🚀 <b>财务管理助手</b>
 
 📋 <b>快速开始</b>
-┣ 📊 /add_expense — 添加支出
-┣ 💰 /categories — 支出类别  
-┣ ⚙️ /settings — 系统配置
-┗ 📈 /report — 报表生成
+┣ 📊 /SaleInvoice — 添加支出
+┣ 💰 /Categories — 支出类别  
+┣ ⚙️ /Settings — 系统配置
+┗ 📈 /Report — 报表生成
 
 💡 /help 详细说明 | ❌ /cancel 取消操作
     """
@@ -53,22 +53,23 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • /help — 帮助说明
 • /cancel — 取消当前操作
 
-📊 <b>添加支出</b> (/add_expense)
-• 格式: /add_expense 日期 类别 金额 描述 [备注]
-• 例如: <code>/add_expense 2024-06-10 餐饮 50 午餐</code>
+📊 <b>添加支出</b> (/SaleInvoice)
+• 格式: /SaleInvoice 日期 类别 金额 描述 [备注]
+• 例如: <code>/SaleInvoice 2024-06-10 餐饮 50 午餐</code>
 • 支持上传收据照片
 
-💰 <b>支出类别</b> (/categories)
+💰 <b>支出类别</b> (/Categories)
 • 查看所有可用类别
 • 餐饮、交通、购物等
 
-⚙️ <b>系统配置</b> (/settings)
-• 查看当前配置
-• 修改默认设置
+⚙️ <b>系统配置</b> (/Settings)
+• 创建代理商
+• 创建供应商
+• 创建负责人
 
-📈 <b>报表功能</b> (/report)
+📈 <b>报表功能</b> (/Report)
 • 生成当月报表
-• 指定月份查询 <code>/report 2024-06</code>
+• 指定月份查询 <code>/Report 2024-06</code>
 
 💡 <b>小贴士：直接发送收据照片，系统会自动处理</b>
     """
@@ -85,14 +86,14 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     return ConversationHandler.END
 
 async def add_expense_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """处理/add_expense命令"""
-    logger.info(f"收到/add_expense命令，来自用户ID: {update.effective_user.id}, 参数: {context.args}")
+    """处理/SaleInvoice命令"""
+    logger.info(f"收到/SaleInvoice命令，来自用户ID: {update.effective_user.id}, 参数: {context.args}")
     try:
         # 检查参数数量
         if len(context.args) < 4:
             logger.warning(f"参数不足，用户ID: {update.effective_user.id}")
             await update.message.reply_text(
-                "⚠️ <b>参数不足</b>\n\n请使用以下格式：\n<code>/add_expense 日期 类别 金额 描述 [备注]</code>\n例如：<code>/add_expense 2024-06-10 餐饮 50 午餐</code>",
+                "⚠️ <b>参数不足</b>\n\n请使用以下格式：\n<code>/SaleInvoice 日期 类别 金额 描述 [备注]</code>\n例如：<code>/SaleInvoice 2024-06-10 餐饮 50 午餐</code>",
                 parse_mode=ParseMode.HTML
             )
             return
@@ -130,7 +131,7 @@ async def add_expense_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.error(f"金额格式错误，用户ID: {update.effective_user.id}")
         await update.message.reply_text("⚠️ 金额格式错误，请输入有效的数字")
     except Exception as e:
-        logger.error(f"处理add_expense命令时出错: {e}, 用户ID: {update.effective_user.id}")
+        logger.error(f"处理SaleInvoice命令时出错: {e}, 用户ID: {update.effective_user.id}")
         await update.message.reply_text("⚠️ 发生错误，请稍后重试")
 
 async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -157,11 +158,11 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 success_message = f"""
 📸 <b>收据已上传成功</b>
 
-请使用 /add_expense 命令添加支出记录：
-<code>/add_expense 日期 类别 金额 描述 收据链接</code>
+请使用 /SaleInvoice 命令添加支出记录：
+<code>/SaleInvoice 日期 类别 金额 描述 收据链接</code>
 
 例如：
-<code>/add_expense 2024-06-10 餐饮 50 午餐 {file_url}</code>
+<code>/SaleInvoice 2024-06-10 餐饮 50 午餐 {file_url}</code>
 """
                 
                 await update.message.reply_text(success_message, parse_mode=ParseMode.HTML)
@@ -180,8 +181,8 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ 处理照片时出错，请稍后重试")
 
 async def categories_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """处理/categories命令"""
-    logger.info(f"收到/categories命令，来自用户ID: {update.effective_user.id}")
+    """处理/Categories命令"""
+    logger.info(f"收到/Categories命令，来自用户ID: {update.effective_user.id}")
     
     categories_message = """
 📋 <b>支出类别列表</b>
@@ -196,15 +197,15 @@ async def categories_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 • 📱 通讯 - 话费、网费等
 • 🔧 其他 - 未分类支出
 
-使用 <code>/add_expense</code> 命令时请使用以上类别
+使用 <code>/SaleInvoice</code> 命令时请使用以上类别
 """
     
     await update.message.reply_text(categories_message, parse_mode=ParseMode.HTML)
-    logger.info(f"已回复/categories命令，用户ID: {update.effective_user.id}")
+    logger.info(f"已回复/Categories命令，用户ID: {update.effective_user.id}")
 
 async def settings_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """处理/settings命令"""
-    logger.info(f"收到/settings命令，来自用户ID: {update.effective_user.id}")
+    """处理/Settings命令"""
+    logger.info(f"收到/Settings命令，来自用户ID: {update.effective_user.id}")
     
     # 创建内联键盘
     keyboard = [
@@ -221,15 +222,19 @@ async def settings_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 """
     
     await update.message.reply_text(settings_message, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
-    logger.info(f"已回复/settings命令，用户ID: {update.effective_user.id}")
+    logger.info(f"已回复/Settings命令，用户ID: {update.effective_user.id}")
     return MAIN_MENU
 
 async def settings_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """处理设置菜单按钮点击"""
     query = update.callback_query
+    logger.info(f"收到回调查询: {query.data}, 来自用户ID: {update.effective_user.id}")
+    
+    # 必须先回复查询，否则用户会看到加载图标
     await query.answer()
     
     if query.data == "create_agent":
+        logger.info(f"用户选择了创建代理商, 用户ID: {update.effective_user.id}")
         await query.edit_message_text(
             "📝 <b>创建代理商</b>\n\n请输入代理商名称:", 
             parse_mode=ParseMode.HTML
@@ -237,6 +242,7 @@ async def settings_button_handler(update: Update, context: ContextTypes.DEFAULT_
         return WAITING_AGENT_NAME
         
     elif query.data == "create_supplier":
+        logger.info(f"用户选择了创建供应商, 用户ID: {update.effective_user.id}")
         await query.edit_message_text(
             "📝 <b>创建供应商</b>\n\n请输入供应商名称:", 
             parse_mode=ParseMode.HTML
@@ -244,12 +250,19 @@ async def settings_button_handler(update: Update, context: ContextTypes.DEFAULT_
         return WAITING_SUPPLIER_NAME
         
     elif query.data == "create_personal":
+        logger.info(f"用户选择了创建负责人, 用户ID: {update.effective_user.id}")
         await query.edit_message_text(
             "📝 <b>创建负责人</b>\n\n请输入负责人姓名:", 
             parse_mode=ParseMode.HTML
         )
         return WAITING_PERSONAL_NAME
     
+    # 如果是未知的回调数据，返回到主菜单
+    logger.warning(f"收到未知回调数据: {query.data}, 用户ID: {update.effective_user.id}")
+    await query.edit_message_text(
+        "⚠️ 未知操作，请重新选择", 
+        parse_mode=ParseMode.HTML
+    )
     return ConversationHandler.END
 
 async def agent_name_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -337,8 +350,8 @@ async def personal_name_handler(update: Update, context: ContextTypes.DEFAULT_TY
     return ConversationHandler.END
 
 async def report_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """处理/report命令"""
-    logger.info(f"收到/report命令，来自用户ID: {update.effective_user.id}")
+    """处理/Report命令"""
+    logger.info(f"收到/Report命令，来自用户ID: {update.effective_user.id}")
     
     report_message = """
 📊 <b>报表功能</b>
@@ -353,7 +366,7 @@ async def report_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 """
     
     await update.message.reply_text(report_message, parse_mode=ParseMode.HTML)
-    logger.info(f"已回复/report命令，用户ID: {update.effective_user.id}")
+    logger.info(f"已回复/Report命令，用户ID: {update.effective_user.id}")
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     """处理错误"""
