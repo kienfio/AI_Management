@@ -3,6 +3,7 @@ import logging
 import time
 import signal
 import asyncio
+import atexit
 from dotenv import load_dotenv
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ConversationHandler
 from handlers import (start_handler, help_handler, settings_handler, cancel_command, 
@@ -22,39 +23,59 @@ logger = logging.getLogger(__name__)
 # 全局应用实例
 application = None
 
+async def cleanup_webhook():
+    """清理webhook设置"""
+    global application
+    if application:
+        try:
+            # 删除webhook设置
+            await application.bot.delete_webhook()
+            logger.info("成功清理webhook设置")
+        except Exception as e:
+            logger.error(f"清理webhook时出错: {e}")
+
 async def shutdown_handler(signum, frame):
     """处理程序关闭信号"""
     global application
     logger.info(f"收到信号 {signum}，正在关闭...")
     if application:
-        application.stop()
-        await application.shutdown()
-    logger.info("机器人已关闭")
+        try:
+            # 停止更新
+            application.stop_running()
+            # 清理webhook
+            await cleanup_webhook()
+            # 关闭应用
+            await application.shutdown()
+            # 等待所有任务完成
+            tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            logger.info("机器人已正确关闭")
+        except Exception as e:
+            logger.error(f"关闭过程中出错: {e}")
+    else:
+        logger.info("没有运行中的应用实例")
 
-def main():
-    """主函数，启动Telegram机器人"""
+def register_shutdown_handlers():
+    """注册关闭处理程序"""
+    # 注册信号处理
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(sig, lambda s, f: asyncio.run(shutdown_handler(s, f)))
+    
+    # 注册退出处理
+    atexit.register(lambda: asyncio.run(cleanup_webhook()))
+
+async def initialize_bot(token):
+    """初始化机器人"""
     global application
     
-    # 加载环境变量
-    load_dotenv()
-    
-    # 获取Telegram令牌
-    token = os.getenv("TELEGRAM_TOKEN")
-    if not token:
-        logger.error("未找到TELEGRAM_TOKEN环境变量")
-        return
-
     try:
-        # 确保之前的连接已经关闭
-        if application:
-            application.stop()
-            asyncio.run(application.shutdown())
-            application = None
-            logger.info("已关闭之前的应用实例")
-            time.sleep(2)  # 等待之前的连接完全关闭
-        
         # 创建新的应用实例
         application = Application.builder().token(token).build()
+        
+        # 清理之前的webhook设置
+        await cleanup_webhook()
         
         # 初始化Google服务（设置为非必需）
         try:
@@ -79,7 +100,7 @@ def main():
             fallbacks=[CommandHandler("cancel", cancel_command)],
             name="settings_conversation",
             persistent=False,
-            per_message=True  # 添加这个参数
+            per_message=True
         )
         
         # 添加命令处理器
@@ -104,16 +125,37 @@ def main():
         # 设置错误处理器
         application.add_error_handler(error_handler)
         
-        # 设置信号处理
-        signal.signal(signal.SIGINT, lambda s, f: asyncio.run(shutdown_handler(s, f)))
-        signal.signal(signal.SIGTERM, lambda s, f: asyncio.run(shutdown_handler(s, f)))
+        return True
+    except Exception as e:
+        logger.error(f"初始化机器人时出错: {e}")
+        return False
+
+def main():
+    """主函数，启动Telegram机器人"""
+    # 加载环境变量
+    load_dotenv()
+    
+    # 获取Telegram令牌
+    token = os.getenv("TELEGRAM_TOKEN")
+    if not token:
+        logger.error("未找到TELEGRAM_TOKEN环境变量")
+        return
+
+    try:
+        # 注册关闭处理程序
+        register_shutdown_handlers()
+        
+        # 初始化机器人
+        if not asyncio.run(initialize_bot(token)):
+            logger.error("机器人初始化失败")
+            return
         
         # 启动机器人
         logger.info("机器人正在启动...")
         application.run_polling(
             allowed_updates=["message", "callback_query", "chat_member"],
             drop_pending_updates=True,
-            close_loop=False  # 防止循环被关闭
+            close_loop=False
         )
         
     except Exception as e:
@@ -122,9 +164,7 @@ def main():
         # 确保应用程序正确关闭
         if application:
             try:
-                application.stop()
-                asyncio.run(application.shutdown())
-                logger.info("机器人已正确关闭")
+                asyncio.run(shutdown_handler(signal.SIGTERM, None))
             except Exception as e:
                 logger.error(f"关闭机器人时出错: {e}")
 
