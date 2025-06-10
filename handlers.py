@@ -2,11 +2,12 @@ import os
 from datetime import datetime
 import re
 from dotenv import load_dotenv
-from telegram import Update
-from telegram.ext import ContextTypes, ConversationHandler
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes, ConversationHandler, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 from google_services import GoogleServices
 from telegram.constants import ParseMode
 import logging
+import json
 
 # 加载环境变量
 load_dotenv()
@@ -22,12 +23,33 @@ except Exception as e:
 EXPENSE_CATEGORIES = ['食品', '住房', '交通', '娱乐', '医疗', '教育', '水电', '其他']
 # 收入类别列表
 INCOME_CATEGORIES = ['薪资', '奖金', '投资', '兼职', '其他']
+# 供应商类别列表
+SUPPLIER_CATEGORIES = ['原材料', '设备', '服务', '办公用品', '其他']
 
 # 用户状态追踪
 user_states = {}
 
 # 设置日志
 logger = logging.getLogger(__name__)
+
+# 会话状态
+(
+    MAIN_MENU,
+    PERSON_NAME,
+    AGENT_NAME,
+    AGENT_IC,
+    SUPPLIER_CATEGORY,
+    SUPPLIER_PRODUCT,
+) = range(6)
+
+# 回调数据前缀
+CALLBACK_PREFIX = {
+    'SETTINGS': 'settings',
+    'CREATE_PERSON': 'create_person',
+    'CREATE_AGENT': 'create_agent',
+    'CREATE_SUPPLIER': 'create_supplier',
+    'SUPPLIER_CAT': 'supplier_cat'
+}
 
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """处理 /start 命令"""
@@ -36,13 +58,24 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 📋 *快速开始*
 ┣ 📊 /sales — 销售记录
-┣ 💰 /cost — 成本管理  
+┣ 💰 /Cost — 成本管理  
 ┣ ⚙️ /settings — 系统配置
 ┗ 📈 /report — 报表生成
 
 💡 /help 详细说明 | ❌ /cancel 取消操作
     """
-    await update.message.reply_text(welcome_message, parse_mode=ParseMode.MARKDOWN)
+    keyboard = [
+        [
+            InlineKeyboardButton("📊 销售记录", callback_data="sales"),
+            InlineKeyboardButton("💰 成本管理", callback_data="cost")
+        ],
+        [
+            InlineKeyboardButton("⚙️ 系统配置", callback_data=f"{CALLBACK_PREFIX['SETTINGS']}_main"),
+            InlineKeyboardButton("📈 报表生成", callback_data="report")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(welcome_message, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
 
 async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """处理 /help 命令"""
@@ -67,9 +100,9 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 • 其他支出登记
 
 ⚙️ *系统配置* (/settings)
-• 代理商管理
-• 供应商维护
-• 产品分类设置
+• 负责人管理
+• 代理商维护
+• 供应商设置
 
 📈 *报表功能* (/report)
 • 生成当月报表
@@ -78,6 +111,206 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 💡 *小贴士：随时使用 /cancel 退出当前操作*
     """
     await update.message.reply_text(help_message, parse_mode=ParseMode.MARKDOWN)
+
+# 设置相关处理函数
+async def settings_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """处理 /settings 命令，显示系统配置选项"""
+    keyboard = [
+        [InlineKeyboardButton("👤 创建负责人", callback_data=f"{CALLBACK_PREFIX['CREATE_PERSON']}")],
+        [InlineKeyboardButton("🧑‍💼 创建Agent", callback_data=f"{CALLBACK_PREFIX['CREATE_AGENT']}")],
+        [InlineKeyboardButton("🏭 创建Supplier", callback_data=f"{CALLBACK_PREFIX['CREATE_SUPPLIER']}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        "⚙️ *系统配置*\n\n请选择要执行的操作：",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=reply_markup
+    )
+
+async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理按钮回调查询"""
+    query = update.callback_query
+    await query.answer()  # 回答回调查询，关闭按钮上的加载状态
+    
+    callback_data = query.data
+    
+    # 设置主菜单
+    if callback_data.startswith(f"{CALLBACK_PREFIX['SETTINGS']}_main"):
+        keyboard = [
+            [InlineKeyboardButton("👤 创建负责人", callback_data=f"{CALLBACK_PREFIX['CREATE_PERSON']}")],
+            [InlineKeyboardButton("🧑‍💼 创建Agent", callback_data=f"{CALLBACK_PREFIX['CREATE_AGENT']}")],
+            [InlineKeyboardButton("🏭 创建Supplier", callback_data=f"{CALLBACK_PREFIX['CREATE_SUPPLIER']}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            text="⚙️ *系统配置*\n\n请选择要执行的操作：",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=reply_markup
+        )
+        return MAIN_MENU
+    
+    # 处理创建负责人
+    elif callback_data == CALLBACK_PREFIX['CREATE_PERSON']:
+        context.user_data['current_action'] = 'create_person'
+        await query.edit_message_text(
+            text="👤 *创建负责人*\n\n请输入负责人的姓名：",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return PERSON_NAME
+    
+    # 处理创建Agent
+    elif callback_data == CALLBACK_PREFIX['CREATE_AGENT']:
+        context.user_data['current_action'] = 'create_agent'
+        await query.edit_message_text(
+            text="🧑‍💼 *创建Agent*\n\n请输入Agent的姓名：",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return AGENT_NAME
+    
+    # 处理创建Supplier
+    elif callback_data == CALLBACK_PREFIX['CREATE_SUPPLIER']:
+        context.user_data['current_action'] = 'create_supplier'
+        keyboard = []
+        # 每行两个类别按钮
+        row = []
+        for i, category in enumerate(SUPPLIER_CATEGORIES):
+            row.append(InlineKeyboardButton(
+                category, callback_data=f"{CALLBACK_PREFIX['SUPPLIER_CAT']}_{category}"
+            ))
+            if (i + 1) % 2 == 0 or i == len(SUPPLIER_CATEGORIES) - 1:
+                keyboard.append(row)
+                row = []
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            text="🏭 *创建Supplier*\n\n请选择供应商类别：",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=reply_markup
+        )
+        return SUPPLIER_CATEGORY
+    
+    # 处理供应商类别选择
+    elif callback_data.startswith(f"{CALLBACK_PREFIX['SUPPLIER_CAT']}_"):
+        category = callback_data.split('_')[-1]
+        context.user_data['supplier_category'] = category
+        await query.edit_message_text(
+            text=f"🏭 *创建Supplier*\n\n已选择类别：*{category}*\n\n请输入供应的产品：",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return SUPPLIER_PRODUCT
+    
+    # 其他回调处理
+    else:
+        if callback_data == "sales":
+            await query.edit_message_text(text="销售记录功能正在开发中...")
+        elif callback_data == "cost":
+            await query.edit_message_text(text="成本管理功能正在开发中...")
+        elif callback_data == "report":
+            await query.edit_message_text(text="报表功能正在开发中...")
+        else:
+            await query.edit_message_text(text="未知的操作")
+        return ConversationHandler.END
+
+async def person_name_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理负责人姓名输入"""
+    name = update.message.text
+    context.user_data['person_name'] = name
+    
+    # 使用数据管理器保存数据
+    from data_manager import data_manager
+    
+    if data_manager:
+        success = data_manager.add_person(name)
+        if success:
+            await update.message.reply_text(
+                f"✅ 负责人创建成功！\n\n姓名：*{name}*",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        else:
+            await update.message.reply_text(
+                f"❌ 创建失败，负责人 *{name}* 可能已存在。",
+                parse_mode=ParseMode.MARKDOWN
+            )
+    else:
+        # 数据管理器不可用，仍然显示成功信息但记录错误
+        logger.error("数据管理器不可用，无法保存负责人数据")
+        await update.message.reply_text(
+            f"✅ 负责人创建成功！\n\n姓名：*{name}*\n\n(注意：数据可能未成功保存)",
+            parse_mode=ParseMode.MARKDOWN
+        )
+    
+    return ConversationHandler.END
+
+async def agent_name_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理Agent姓名输入"""
+    name = update.message.text
+    context.user_data['agent_name'] = name
+    
+    await update.message.reply_text(
+        f"请为Agent *{name}* 输入IC号码：",
+        parse_mode=ParseMode.MARKDOWN
+    )
+    return AGENT_IC
+
+async def agent_ic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理Agent IC输入"""
+    ic = update.message.text
+    name = context.user_data.get('agent_name')
+    
+    # 使用数据管理器保存数据
+    from data_manager import data_manager
+    
+    if data_manager:
+        success = data_manager.add_agent(name, ic)
+        if success:
+            await update.message.reply_text(
+                f"✅ Agent创建成功！\n\n姓名：*{name}*\nIC：*{ic}*",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        else:
+            await update.message.reply_text(
+                f"❌ 创建失败，Agent *{name}* 或IC *{ic}* 可能已存在。",
+                parse_mode=ParseMode.MARKDOWN
+            )
+    else:
+        # 数据管理器不可用，仍然显示成功信息但记录错误
+        logger.error("数据管理器不可用，无法保存Agent数据")
+        await update.message.reply_text(
+            f"✅ Agent创建成功！\n\n姓名：*{name}*\nIC：*{ic}*\n\n(注意：数据可能未成功保存)",
+            parse_mode=ParseMode.MARKDOWN
+        )
+    
+    return ConversationHandler.END
+
+async def supplier_product_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理供应商产品输入"""
+    product = update.message.text
+    category = context.user_data.get('supplier_category')
+    
+    # 使用数据管理器保存数据
+    from data_manager import data_manager
+    
+    if data_manager:
+        success = data_manager.add_supplier(category, product)
+        if success:
+            await update.message.reply_text(
+                f"✅ 供应商创建成功！\n\n类别：*{category}*\n产品：*{product}*",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        else:
+            await update.message.reply_text(
+                f"❌ 创建失败，保存供应商数据时出错。",
+                parse_mode=ParseMode.MARKDOWN
+            )
+    else:
+        # 数据管理器不可用，仍然显示成功信息但记录错误
+        logger.error("数据管理器不可用，无法保存供应商数据")
+        await update.message.reply_text(
+            f"✅ 供应商创建成功！\n\n类别：*{category}*\n产品：*{product}*\n\n(注意：数据可能未成功保存)",
+            parse_mode=ParseMode.MARKDOWN
+        )
+    
+    return ConversationHandler.END
 
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """处理 /cancel 命令，取消当前会话"""
