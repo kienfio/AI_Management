@@ -15,23 +15,22 @@ from google.oauth2.service_account import Credentials
 
 logger = logging.getLogger(__name__)
 
+# 检查环境变量
+print("正在检查环境变量...")
+print(f"GOOGLE_CREDENTIALS_BASE64: {'✅ 已设置' if os.getenv('GOOGLE_CREDENTIALS_BASE64') else '❌ 未设置'}")
+print(f"GOOGLE_SHEET_ID: {'✅ 已设置' if os.getenv('GOOGLE_SHEET_ID') else '❌ 未设置'}")
+print(f"TELEGRAM_TOKEN: {'✅ 已设置' if os.getenv('TELEGRAM_TOKEN') else '❌ 未设置'}")
+
 # Telegram Bot 配置
 BOT_TOKEN = os.getenv('TELEGRAM_TOKEN')
 if not BOT_TOKEN:
     raise ValueError("未设置 TELEGRAM_TOKEN 环境变量")
 
-# 配置常量
-SHEET_NAMES = {
-    'sales': '销售记录',
-    'expenses': '费用记录', 
-    'agents': '代理商管理',
-    'suppliers': '供应商管理'
-}
-
-SALES_HEADERS = ['日期', '销售人员', '发票金额', '客户类型', '佣金比例', '佣金金额', '备注']
-EXPENSES_HEADERS = ['日期', '费用类型', '供应商', '金额', '类别', '备注']
-AGENTS_HEADERS = ['姓名', '联系人', '电话', '邮箱', '佣金比例', '状态']
-SUPPLIERS_HEADERS = ['供应商名称', '联系人', '电话', '邮箱', '产品/服务', '状态']
+# 从google_sheets.py导入常量
+from google_sheets import (
+    SHEET_NAMES, SALES_HEADERS, EXPENSES_HEADERS,
+    AGENTS_HEADERS, SUPPLIERS_HEADERS
+)
 
 class GoogleSheetsManager:
     """Google Sheets 管理器 - 适配 Render 部署环境"""
@@ -50,7 +49,20 @@ class GoogleSheetsManager:
             'https://www.googleapis.com/auth/drive'
         ]
         
-        # 方式1: 从 GOOGLE_CREDENTIALS_CONTENT 读取 JSON 内容 (Render 推荐)
+        # 方式1: 从Base64编码的环境变量读取 (推荐用于Render)
+        google_creds_base64 = os.getenv('GOOGLE_CREDENTIALS_BASE64')
+        if google_creds_base64:
+            try:
+                import base64
+                # 解码Base64字符串
+                creds_json = base64.b64decode(google_creds_base64).decode('utf-8')
+                creds_info = json.loads(creds_json)
+                logger.info("✅ 使用 GOOGLE_CREDENTIALS_BASE64 环境变量")
+                return Credentials.from_service_account_info(creds_info, scopes=scope)
+            except Exception as e:
+                logger.error(f"❌ 解析 GOOGLE_CREDENTIALS_BASE64 失败: {e}")
+        
+        # 方式2: 从 GOOGLE_CREDENTIALS_CONTENT 读取 JSON 内容
         google_creds_content = os.getenv('GOOGLE_CREDENTIALS_CONTENT')
         if google_creds_content:
             try:
@@ -67,13 +79,13 @@ class GoogleSheetsManager:
             except json.JSONDecodeError as e:
                 logger.error(f"❌ 解析 GOOGLE_CREDENTIALS_CONTENT 失败: {e}")
         
-        # 方式2: 从 GOOGLE_CREDENTIALS_FILE 读取文件路径
+        # 方式3: 从 GOOGLE_CREDENTIALS_FILE 读取文件路径
         google_creds_file = os.getenv('GOOGLE_CREDENTIALS_FILE')
         if google_creds_file and os.path.exists(google_creds_file):
             logger.info("✅ 使用 GOOGLE_CREDENTIALS_FILE 环境变量")
             return Credentials.from_service_account_file(google_creds_file, scopes=scope)
         
-        # 方式3: 兼容旧的 GOOGLE_CREDENTIALS_JSON 变量名
+        # 方式4: 兼容旧的 GOOGLE_CREDENTIALS_JSON 变量名
         google_creds_json = os.getenv('GOOGLE_CREDENTIALS_JSON')
         if google_creds_json:
             try:
@@ -83,7 +95,7 @@ class GoogleSheetsManager:
             except json.JSONDecodeError as e:
                 logger.error(f"❌ 解析 GOOGLE_CREDENTIALS_JSON 失败: {e}")
         
-        # 方式4: 默认文件路径 (本地开发)
+        # 方式5: 默认文件路径 (本地开发)
         default_paths = [
             'credentials.json',
             'google_credentials.json',
@@ -97,6 +109,7 @@ class GoogleSheetsManager:
         
         raise ValueError(
             "❌ 未找到 Google API 凭证。请设置以下任一环境变量：\n"
+            "- GOOGLE_CREDENTIALS_BASE64: Base64编码的JSON凭证（推荐）\n"
             "- GOOGLE_CREDENTIALS_CONTENT: 完整的 JSON 凭证内容\n"
             "- GOOGLE_CREDENTIALS_FILE: 凭证文件路径\n"
             "- GOOGLE_CREDENTIALS_JSON: JSON 凭证字符串（兼容）\n"
@@ -456,5 +469,6 @@ class GoogleSheetsManager:
             logger.error(f"❌ 生成月度报表失败: {e}")
             return {}
 
-# 创建全局实例
-sheets_manager = GoogleSheetsManager()
+# 不要在导入时自动创建实例
+# sheets_manager = GoogleSheetsManager()
+# 改为在需要时手动创建实例
