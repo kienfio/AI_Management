@@ -75,8 +75,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def clear_webhook(token):
+    """清除现有的webhook设置"""
+    import requests
+    url = f"https://api.telegram.org/bot{token}/deleteWebhook?drop_pending_updates=true"
+    try:
+        response = requests.get(url)
+        result = response.json()
+        if result.get('ok'):
+            logger.info("✅ Webhook已成功清除")
+        else:
+            logger.error(f"❌ 清除Webhook失败: {result.get('description')}")
+    except Exception as e:
+        logger.error(f"❌ 请求失败: {e}")
+
 def main():
     """主函数 - 启动 Bot"""
+    
+    # 先清除现有的webhook设置
+    logger.info("正在清除现有的webhook设置...")
+    clear_webhook(BOT_TOKEN)
     
     # 创建 Application
     application = Application.builder().token(BOT_TOKEN).build()
