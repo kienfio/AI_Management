@@ -57,6 +57,7 @@ async def run_bot():
         # 检查Telegram连接
         if not await check_telegram_connection(telegram_token):
             logger.error("无法验证Telegram令牌，请检查令牌是否有效")
+            return
         
         # 创建应用实例
         logger.info("创建Telegram应用实例...")
@@ -81,19 +82,17 @@ async def run_bot():
         logger.info("机器人初始化成功，开始接收消息")
         update_bot_status(running=True)
         
-        # 运行轮询
-        logger.info("开始轮询更新...")
-        await application.run_polling(
-            allowed_updates=["message", "callback_query", "chat_member"],
-            drop_pending_updates=True,
-            close_loop=False,
-            pool_timeout=10.0,
-            read_timeout=15.0,
-            connect_timeout=15.0
-        )
+        # 让事件循环持续运行
+        logger.info("事件循环开始运行...")
+        while True:
+            await asyncio.sleep(60)  # 每分钟检查一次
+            logger.info("机器人仍在运行...")
+            
     except ValueError as e:
         # 配置错误，记录但不需要详细堆栈
         logger.error(f"配置错误: {e}")
+    except asyncio.CancelledError:
+        logger.info("机器人任务被取消")
     except Exception as e:
         # 其他错误，记录详细堆栈
         logger.error(f"运行机器人时出错: {e}")
