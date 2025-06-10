@@ -12,6 +12,10 @@ from bot.handlers import (
     help_handler,
     add_expense_handler,
     photo_handler,
+    cancel_handler,
+    categories_handler,
+    settings_handler,
+    report_handler,
     error_handler
 )
 from common.shared import logger, update_bot_status
@@ -49,6 +53,10 @@ async def setup_webhook():
         application.add_handler(CommandHandler("start", start_handler))
         application.add_handler(CommandHandler("help", help_handler))
         application.add_handler(CommandHandler("add_expense", add_expense_handler))
+        application.add_handler(CommandHandler("cancel", cancel_handler))
+        application.add_handler(CommandHandler("categories", categories_handler))
+        application.add_handler(CommandHandler("settings", settings_handler))
+        application.add_handler(CommandHandler("report", report_handler))
         application.add_handler(MessageHandler(filters.PHOTO, photo_handler))
         
         # 添加错误处理程序
@@ -97,15 +105,42 @@ async def shutdown_webhook():
     global application
     
     if not application:
+        logger.info("应用实例未初始化，无需关闭")
         return
     
     try:
         logger.info("正在关闭webhook...")
-        await application.bot.delete_webhook()
-        await application.stop()
-        await application.shutdown()
+        
+        # 删除webhook
+        try:
+            logger.info("正在删除webhook...")
+            await application.bot.delete_webhook()
+            logger.info("Webhook已删除")
+        except Exception as e:
+            logger.error(f"删除webhook时出错: {e}")
+        
+        # 停止应用
+        try:
+            logger.info("正在停止应用...")
+            await application.stop()
+            logger.info("应用已停止")
+        except Exception as e:
+            logger.error(f"停止应用时出错: {e}")
+        
+        # 关闭应用
+        try:
+            logger.info("正在关闭应用...")
+            await application.shutdown()
+            logger.info("应用已关闭")
+        except Exception as e:
+            logger.error(f"关闭应用时出错: {e}")
+        
+        # 更新状态
         update_bot_status(running=False)
-        logger.info("Webhook已关闭")
+        logger.info("Webhook已完全关闭")
+        
+        # 清除全局引用
+        application = None
     except Exception as e:
         logger.error(f"关闭webhook时出错: {e}")
         import traceback
