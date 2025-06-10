@@ -1,3 +1,3 @@
-from bot.main import initialize_bot, run_bot
+from bot.main import run_bot
 
-__all__ = ['initialize_bot', 'run_bot'] 
+__all__ = ['run_bot'] 
