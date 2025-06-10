@@ -62,16 +62,8 @@ from config import BOT_TOKEN
 from telegram_handlers import (
     # 基础命令
     start_command, help_command, cancel_command, unknown_command, error_handler,
-    # 销售记录
-    sales_conversation, sales_callback_handler,
-    # 费用管理  
-    expenses_conversation, expenses_callback_handler,
-    # 报表生成
-    report_conversation, report_callback_handler,
-    # 系统设置
-    settings_conversation, settings_callback_handler,
-    # 通用回调处理
-    general_callback_handler, close_session_handler
+    # 对话处理器
+    get_conversation_handlers, register_handlers
 )
 
 # 配置日志
@@ -87,29 +79,10 @@ def main():
     # 创建 Application
     application = Application.builder().token(BOT_TOKEN).build()
     
-    # 注册基础命令处理器
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("cancel", cancel_command))
+    # 使用register_handlers函数注册所有处理器
+    register_handlers(application)
     
-    # 注册会话处理器（按优先级顺序）
-    application.add_handler(sales_conversation)
-    application.add_handler(expenses_conversation)  
-    application.add_handler(report_conversation)
-    application.add_handler(settings_conversation)
-    
-    # 注册回调查询处理器
-    application.add_handler(CallbackQueryHandler(sales_callback_handler, pattern='^sales_'))
-    application.add_handler(CallbackQueryHandler(expenses_callback_handler, pattern='^expenses_'))
-    application.add_handler(CallbackQueryHandler(report_callback_handler, pattern='^report_'))
-    application.add_handler(CallbackQueryHandler(settings_callback_handler, pattern='^settings_'))
-    application.add_handler(CallbackQueryHandler(close_session_handler, pattern='^close_session$'))
-    application.add_handler(CallbackQueryHandler(general_callback_handler))
-    
-    # 注册未知命令处理器
-    application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
-    
-    # 注册错误处理器
+    # 确保错误处理器已注册
     application.add_error_handler(error_handler)
     
     # 启动 Bot
