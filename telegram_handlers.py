@@ -47,10 +47,10 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 👋 欢迎使用！请选择需要的功能：
 
-📊 *销售记录* - 登记发票和佣金
-💰 *费用管理* - 记录各项支出
-📈 *报表生成* - 查看统计报告
-⚙️ *系统设置* - 管理基础信息
+📊 *SaleInvoice* - Record Invoice
+💰 *Expense* - Water/Elec/Goods
+📈 *Repport* - Generate monthly/yearly repport
+⚙️ *Setting* - Create Agent/supplier
     """
     
     if update.callback_query:
