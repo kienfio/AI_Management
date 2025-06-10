@@ -22,6 +22,7 @@ async def run_bot():
     loop = None
     
     try:
+        logger.info("正在初始化机器人...")
         # 创建新的事件循环
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -43,18 +44,27 @@ async def run_bot():
         # 添加错误处理程序
         application.add_error_handler(error_handler)
         
+        # 初始化和启动应用
+        logger.info("正在启动机器人...")
+        await application.initialize()
+        await application.start()
+        
+        # 更新状态
         logger.info("机器人初始化成功")
         update_bot_status(running=True)
         
-        # 使用当前事件循环运行机器人
-        await application.initialize()
-        await application.start()
+        # 运行轮询
+        logger.info("开始轮询更新...")
         await application.run_polling(
             allowed_updates=["message", "callback_query", "chat_member"],
             drop_pending_updates=True,
             close_loop=False
         )
+    except ValueError as e:
+        # 配置错误，记录但不需要详细堆栈
+        logger.error(f"配置错误: {e}")
     except Exception as e:
+        # 其他错误，记录详细堆栈
         logger.error(f"运行机器人时出错: {e}")
         import traceback
         logger.error(traceback.format_exc())
@@ -63,8 +73,11 @@ async def run_bot():
         if application:
             try:
                 logger.info("正在关闭Telegram应用...")
-                await application.stop()
-                await application.shutdown()
+                # 确保这些协程被正确等待
+                if hasattr(application, 'stop') and callable(application.stop):
+                    await application.stop()
+                if hasattr(application, 'shutdown') and callable(application.shutdown):
+                    await application.shutdown()
                 logger.info("Telegram应用已关闭")
             except Exception as e:
                 logger.error(f"关闭机器人时出错: {e}")
