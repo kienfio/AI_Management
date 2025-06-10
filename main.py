@@ -6,7 +6,18 @@
 """
 
 import logging
+import os
+import base64
+import json
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+
+# 检查Google凭证
+print("===== 环境变量检查 =====")
+print(f"GOOGLE_CREDENTIALS_BASE64: {'✅ 已设置' if os.getenv('GOOGLE_CREDENTIALS_BASE64') else '❌ 未设置'}")
+print(f"GOOGLE_SHEET_ID: {'✅ 已设置' if os.getenv('GOOGLE_SHEET_ID') else '❌ 未设置'}")
+print(f"TELEGRAM_TOKEN: {'✅ 已设置' if os.getenv('TELEGRAM_TOKEN') else '❌ 未设置'}")
+
+# 先检查凭证再导入配置
 from config import BOT_TOKEN
 from telegram_handlers import (
     # 基础命令
