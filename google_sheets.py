@@ -39,7 +39,15 @@ class GoogleSheetsManager:
         google_creds_content = os.getenv('GOOGLE_CREDENTIALS_CONTENT')
         if google_creds_content:
             try:
+                # 处理可能的转义字符
+                if google_creds_content.startswith('"') and google_creds_content.endswith('"'):
+                    google_creds_content = google_creds_content[1:-1]
+                
+                # 替换转义的引号和换行符
+                google_creds_content = google_creds_content.replace('\\"', '"').replace('\\n', '\n')
+                
                 creds_info = json.loads(google_creds_content)
+                logger.info("✅ 使用 GOOGLE_CREDENTIALS_CONTENT 环境变量")
                 return Credentials.from_service_account_info(creds_info, scopes=scope)
             except json.JSONDecodeError as e:
                 logger.error(f"❌ 解析 GOOGLE_CREDENTIALS_CONTENT 失败: {e}")
@@ -47,9 +55,20 @@ class GoogleSheetsManager:
         # 方式2: 从环境变量读取文件路径
         google_creds_file = os.getenv('GOOGLE_CREDENTIALS_FILE')
         if google_creds_file and os.path.exists(google_creds_file):
+            logger.info("✅ 使用 GOOGLE_CREDENTIALS_FILE 环境变量")
             return Credentials.from_service_account_file(google_creds_file, scopes=scope)
         
-        # 方式3: 默认文件路径
+        # 方式3: 兼容旧的 GOOGLE_CREDENTIALS_JSON 变量名
+        google_creds_json = os.getenv('GOOGLE_CREDENTIALS_JSON')
+        if google_creds_json:
+            try:
+                creds_info = json.loads(google_creds_json)
+                logger.info("✅ 使用 GOOGLE_CREDENTIALS_JSON 环境变量")
+                return Credentials.from_service_account_info(creds_info, scopes=scope)
+            except json.JSONDecodeError as e:
+                logger.error(f"❌ 解析 GOOGLE_CREDENTIALS_JSON 失败: {e}")
+        
+        # 方式4: 默认文件路径
         default_paths = [
             'credentials.json',
             'google_credentials.json',
@@ -58,12 +77,14 @@ class GoogleSheetsManager:
         
         for path in default_paths:
             if os.path.exists(path):
+                logger.info(f"✅ 使用本地凭证文件: {path}")
                 return Credentials.from_service_account_file(path, scopes=scope)
         
         raise ValueError(
-            "未找到 Google API 凭证。请设置以下任一环境变量：\n"
-            "- GOOGLE_CREDENTIALS_CONTENT: 完整的 JSON 凭证字符串\n"
+            "❌ 未找到 Google API 凭证。请设置以下任一环境变量：\n"
+            "- GOOGLE_CREDENTIALS_CONTENT: 完整的 JSON 凭证内容\n"
             "- GOOGLE_CREDENTIALS_FILE: 凭证文件路径\n"
+            "- GOOGLE_CREDENTIALS_JSON: JSON 凭证字符串（兼容）\n"
             "或在项目根目录放置 credentials.json 文件"
         )
     
@@ -74,9 +95,9 @@ class GoogleSheetsManager:
             creds = self._get_credentials()
             
             # 获取表格 ID
-            self.spreadsheet_id = os.getenv('GOOGLE_SHEETS_ID')
+            self.spreadsheet_id = os.getenv('GOOGLE_SHEET_ID')
             if not self.spreadsheet_id:
-                raise ValueError("未设置 GOOGLE_SHEETS_ID 环境变量")
+                raise ValueError("❌ 未设置 GOOGLE_SHEET_ID 环境变量")
             
             # 创建客户端
             self.client = gspread.authorize(creds)
