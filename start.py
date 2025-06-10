@@ -1,8 +1,9 @@
 import os
-import multiprocessing
-import asyncio
 import logging
+import asyncio
+import uvicorn
 from app import create_app
+from bot.webhook import setup_webhook
 
 # 配置日志
 logging.basicConfig(
@@ -11,46 +12,48 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def run_flask():
-    """运行Flask应用"""
-    logger.info("正在启动Flask应用...")
-    app = create_app()
-    port = int(os.environ.get('PORT', 5000))
-    # 在生产环境中禁用调试模式
-    app.run(host='0.0.0.0', port=port, debug=False)
+async def init_webhook():
+    """初始化webhook"""
+    logger.info("正在初始化webhook...")
+    success = await setup_webhook()
+    if success:
+        logger.info("Webhook初始化成功")
+    else:
+        logger.error("Webhook初始化失败")
 
-def run_bot_wrapper():
-    """包装异步bot运行函数"""
-    logger.info("正在准备启动机器人...")
-    import asyncio
-    from bot.main import run_bot
-    try:
-        # 创建新的事件循环并运行协程
-        logger.info("创建新的事件循环...")
-        asyncio.run(run_bot())
-    except Exception as e:
-        logger.error(f"运行机器人包装器时出错: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
+def run_server():
+    """运行Web服务器"""
+    # 获取应用
+    app = create_app()
+    
+    # 获取端口
+    port = int(os.environ.get('PORT', 5000))
+    
+    # 设置服务器配置
+    config = uvicorn.Config(
+        app=app,
+        host="0.0.0.0",
+        port=port,
+        log_level="info"
+    )
+    
+    # 创建服务器
+    server = uvicorn.Server(config)
+    
+    # 初始化webhook
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(init_webhook())
+    
+    # 运行服务器
+    logger.info(f"启动Web服务器，监听端口 {port}...")
+    server.run()
 
 if __name__ == '__main__':
     logger.info("启动应用...")
     try:
-        # 启动Flask进程
-        logger.info("创建Flask进程...")
-        flask_process = multiprocessing.Process(target=run_flask)
-        flask_process.start()
-        
-        # 启动Bot进程（使用包装器处理异步协程）
-        logger.info("创建Bot进程...")
-        bot_process = multiprocessing.Process(target=run_bot_wrapper)
-        bot_process.start()
-        
-        # 等待两个进程结束
-        logger.info("主进程等待子进程...")
-        flask_process.join()
-        bot_process.join()
+        run_server()
     except Exception as e:
-        logger.error(f"启动进程时出错: {e}")
+        logger.error(f"启动服务器时出错: {e}")
         import traceback
         logger.error(traceback.format_exc()) 
