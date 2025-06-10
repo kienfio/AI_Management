@@ -2,7 +2,8 @@ import threading
 import logging
 import time
 import asyncio
-from bot import initialize_bot, run_bot
+# 直接从bot.main导入，避免循环
+from bot.main import run_bot
 
 # 配置日志
 logging.basicConfig(
