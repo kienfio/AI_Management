@@ -1,13 +1,26 @@
 import os
 import logging
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
-from telegram.ext import ContextTypes, ConversationHandler
+from telegram.ext import ContextTypes, ConversationHandler, CallbackQueryHandler
 from common.google_services import GoogleServices
 from common.shared import logger
 
 # 初始化Google服务
 google_services = GoogleServices()
+
+# 定义会话状态
+(
+    MAIN_MENU,
+    CREATE_AGENT,
+    CREATE_SUPPLIER,
+    CREATE_PERSONAL,
+    WAITING_AGENT_NAME,
+    WAITING_AGENT_IC,
+    WAITING_SUPPLIER_NAME,
+    WAITING_SUPPLIER_CATEGORY,
+    WAITING_PERSONAL_NAME,
+) = range(9)
 
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """处理/start命令"""
@@ -193,20 +206,135 @@ async def settings_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """处理/settings命令"""
     logger.info(f"收到/settings命令，来自用户ID: {update.effective_user.id}")
     
+    # 创建内联键盘
+    keyboard = [
+        [InlineKeyboardButton("创建代理商", callback_data="create_agent")],
+        [InlineKeyboardButton("创建供应商", callback_data="create_supplier")],
+        [InlineKeyboardButton("创建负责人", callback_data="create_personal")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
     settings_message = """
 ⚙️ <b>系统设置</b>
 
-当前配置:
-• 📊 数据同步: Google Sheets
-• 📁 文件存储: Google Drive
-• 🔔 提醒功能: 已禁用
-• 📅 报表周期: 月度
-
-<b>功能开发中，敬请期待...</b>
+请选择要执行的操作:
 """
     
-    await update.message.reply_text(settings_message, parse_mode=ParseMode.HTML)
+    await update.message.reply_text(settings_message, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
     logger.info(f"已回复/settings命令，用户ID: {update.effective_user.id}")
+    return MAIN_MENU
+
+async def settings_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """处理设置菜单按钮点击"""
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "create_agent":
+        await query.edit_message_text(
+            "📝 <b>创建代理商</b>\n\n请输入代理商名称:", 
+            parse_mode=ParseMode.HTML
+        )
+        return WAITING_AGENT_NAME
+        
+    elif query.data == "create_supplier":
+        await query.edit_message_text(
+            "📝 <b>创建供应商</b>\n\n请输入供应商名称:", 
+            parse_mode=ParseMode.HTML
+        )
+        return WAITING_SUPPLIER_NAME
+        
+    elif query.data == "create_personal":
+        await query.edit_message_text(
+            "📝 <b>创建负责人</b>\n\n请输入负责人姓名:", 
+            parse_mode=ParseMode.HTML
+        )
+        return WAITING_PERSONAL_NAME
+    
+    return ConversationHandler.END
+
+async def agent_name_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """处理代理商名称输入"""
+    agent_name = update.message.text
+    context.user_data['agent_name'] = agent_name
+    
+    await update.message.reply_text(
+        f"已记录代理商名称: <b>{agent_name}</b>\n\n请输入代理商IC号码:", 
+        parse_mode=ParseMode.HTML
+    )
+    return WAITING_AGENT_IC
+
+async def agent_ic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """处理代理商IC输入"""
+    agent_ic = update.message.text
+    agent_name = context.user_data.get('agent_name', '未知')
+    
+    # 保存到数据库或Google表格
+    try:
+        # 这里添加保存代理商信息的代码
+        # 例如: google_services.add_agent(agent_name, agent_ic)
+        
+        await update.message.reply_text(
+            f"✅ <b>代理商创建成功</b>\n\n名称: <code>{agent_name}</code>\nIC: <code>{agent_ic}</code>",
+            parse_mode=ParseMode.HTML
+        )
+        logger.info(f"用户 {update.effective_user.id} 创建了代理商: {agent_name}, IC: {agent_ic}")
+    except Exception as e:
+        logger.error(f"创建代理商时出错: {e}")
+        await update.message.reply_text("❌ 创建代理商失败，请稍后重试")
+    
+    return ConversationHandler.END
+
+async def supplier_name_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """处理供应商名称输入"""
+    supplier_name = update.message.text
+    context.user_data['supplier_name'] = supplier_name
+    
+    await update.message.reply_text(
+        f"已记录供应商名称: <b>{supplier_name}</b>\n\n请输入供应商类别:", 
+        parse_mode=ParseMode.HTML
+    )
+    return WAITING_SUPPLIER_CATEGORY
+
+async def supplier_category_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """处理供应商类别输入"""
+    supplier_category = update.message.text
+    supplier_name = context.user_data.get('supplier_name', '未知')
+    
+    # 保存到数据库或Google表格
+    try:
+        # 这里添加保存供应商信息的代码
+        # 例如: google_services.add_supplier(supplier_name, supplier_category)
+        
+        await update.message.reply_text(
+            f"✅ <b>供应商创建成功</b>\n\n名称: <code>{supplier_name}</code>\n类别: <code>{supplier_category}</code>",
+            parse_mode=ParseMode.HTML
+        )
+        logger.info(f"用户 {update.effective_user.id} 创建了供应商: {supplier_name}, 类别: {supplier_category}")
+    except Exception as e:
+        logger.error(f"创建供应商时出错: {e}")
+        await update.message.reply_text("❌ 创建供应商失败，请稍后重试")
+    
+    return ConversationHandler.END
+
+async def personal_name_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """处理负责人姓名输入"""
+    personal_name = update.message.text
+    
+    # 保存到数据库或Google表格
+    try:
+        # 这里添加保存负责人信息的代码
+        # 例如: google_services.add_personal(personal_name)
+        
+        await update.message.reply_text(
+            f"✅ <b>负责人创建成功</b>\n\n姓名: <code>{personal_name}</code>",
+            parse_mode=ParseMode.HTML
+        )
+        logger.info(f"用户 {update.effective_user.id} 创建了负责人: {personal_name}")
+    except Exception as e:
+        logger.error(f"创建负责人时出错: {e}")
+        await update.message.reply_text("❌ 创建负责人失败，请稍后重试")
+    
+    return ConversationHandler.END
 
 async def report_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """处理/report命令"""
@@ -272,6 +400,12 @@ __all__ = [
     'cancel_handler',
     'categories_handler',
     'settings_handler',
+    'settings_button_handler',
+    'agent_name_handler',
+    'agent_ic_handler',
+    'supplier_name_handler',
+    'supplier_category_handler',
+    'personal_name_handler',
     'report_handler',
     'error_handler'
 ] 
