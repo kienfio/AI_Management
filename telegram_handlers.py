@@ -1109,9 +1109,13 @@ def get_conversation_handlers():
 def register_handlers(application):
     """注册所有处理器到应用程序"""
     
+    # 初始化对话处理器
+    get_conversation_handlers()
+    
     # 添加会话处理器
-    for conversation in get_conversation_handlers():
-        application.add_handler(conversation)
+    for conversation in [sales_conversation, expenses_conversation, report_conversation, settings_conversation]:
+        if conversation:
+            application.add_handler(conversation)
     
     # 基础命令处理器
     application.add_handler(CommandHandler("start", start_command))
