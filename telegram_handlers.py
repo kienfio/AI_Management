@@ -1008,8 +1008,22 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 # 会话状态管理区 - ConversationHandler 配置
 # ====================================
 
+# 定义全局对话处理器变量
+sales_conversation = None
+expenses_conversation = None
+report_conversation = None
+settings_conversation = None
+sales_callback_handler = callback_query_handler
+expenses_callback_handler = callback_query_handler
+report_callback_handler = callback_query_handler
+settings_callback_handler = callback_query_handler
+close_session_handler = callback_query_handler
+general_callback_handler = callback_query_handler
+
 def get_conversation_handlers():
     """获取所有会话处理器配置"""
+    
+    global sales_conversation, expenses_conversation, report_conversation, settings_conversation
     
     # 销售记录会话处理器
     sales_conversation = ConversationHandler(
@@ -1031,7 +1045,7 @@ def get_conversation_handlers():
     )
     
     # 费用管理会话处理器
-    cost_conversation = ConversationHandler(
+    expenses_conversation = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(cost_type_handler, pattern="^cost_")
         ],
@@ -1086,7 +1100,7 @@ def get_conversation_handlers():
         persistent=False
     )
     
-    return [sales_conversation, cost_conversation, report_conversation, settings_conversation]
+    return [sales_conversation, expenses_conversation, report_conversation, settings_conversation]
 
 # ====================================
 # 主处理器注册函数
