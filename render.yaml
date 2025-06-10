@@ -7,7 +7,7 @@ services:
     envVars:
       - key: TELEGRAM_TOKEN
         sync: false
-      - key: GOOGLE_CREDENTIALS_FILE
+      - key: GOOGLE_CREDENTIALS_CONTENT
         sync: false
       - key: SPREADSHEET_ID
         sync: false
