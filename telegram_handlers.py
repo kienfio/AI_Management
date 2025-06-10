@@ -34,16 +34,16 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await close_other_conversations(update, context)
     
     keyboard = [
-        [InlineKeyboardButton("📊 销售记录", callback_data="menu_sales")],
-        [InlineKeyboardButton("💰 费用管理", callback_data="menu_cost")],
-        [InlineKeyboardButton("📈 报表生成", callback_data="menu_report")],
-        [InlineKeyboardButton("⚙️ 系统设置", callback_data="menu_settings")],
-        [InlineKeyboardButton("❓ 帮助说明", callback_data="menu_help")]
+        [InlineKeyboardButton("📊 SaleInvoice", callback_data="menu_sales")],
+        [InlineKeyboardButton("💰 Expense", callback_data="menu_cost")],
+        [InlineKeyboardButton("📈 Repport", callback_data="menu_report")],
+        [InlineKeyboardButton("⚙️ Setting", callback_data="menu_settings")],
+        [InlineKeyboardButton("❓ Help", callback_data="menu_help")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     welcome_message = """
-🚀 *财务管理助手*
+🚀 *AI-Management_Bot*
 
 👋 欢迎使用！请选择需要的功能：
 
