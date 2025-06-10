@@ -47,17 +47,23 @@ class BotManager:
             bot_main = importlib.import_module('bot.main')
             run_bot = getattr(bot_main, 'run_bot')
             
-            # 运行机器人 - 正确处理异步协程
-            cls._event_loop.run_until_complete(run_bot())
+            # 正确处理异步协程
+            logger.info("启动机器人协程...")
+            asyncio.run_coroutine_threadsafe(run_bot(), cls._event_loop)
+            cls._event_loop.run_forever()
         except Exception as e:
             logger.error(f"启动机器人时出错: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
         finally:
             update_bot_status(running=False)
             # 清理事件循环
             if cls._event_loop and not cls._event_loop.is_closed():
                 try:
+                    logger.info("正在关闭事件循环...")
                     cls._event_loop.stop()
                     cls._event_loop.close()
+                    logger.info("事件循环已关闭")
                 except Exception as e:
                     logger.error(f"关闭事件循环时出错: {e}")
 
