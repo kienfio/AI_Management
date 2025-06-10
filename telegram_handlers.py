@@ -1,6 +1,6 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
-from telegram.ext import ContextTypes, ConversationHandler
+from telegram.ext import ContextTypes, ConversationHandler, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 import logging
 from datetime import datetime
 from google_sheets import GoogleSheetsManager as SheetsManager
@@ -1123,7 +1123,12 @@ def register_handlers(application):
     application.add_handler(CommandHandler("cancel", cancel_command))
     
     # 回调查询处理器 (放在会话处理器之后)
-    application.add_handler(CallbackQueryHandler(callback_query_handler))
+    application.add_handler(CallbackQueryHandler(sales_callback_handler, pattern='^sales_'))
+    application.add_handler(CallbackQueryHandler(expenses_callback_handler, pattern='^(cost_|expenses_)'))
+    application.add_handler(CallbackQueryHandler(report_callback_handler, pattern='^report_'))
+    application.add_handler(CallbackQueryHandler(settings_callback_handler, pattern='^settings_'))
+    application.add_handler(CallbackQueryHandler(close_session_handler, pattern='^close_session$'))
+    application.add_handler(CallbackQueryHandler(general_callback_handler))
     
     # 文本消息处理器
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_message_handler))
