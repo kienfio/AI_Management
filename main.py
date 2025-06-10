@@ -7,7 +7,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from handlers import (start_handler, help_handler, settings_handler, cancel_command, 
                      unknown_command, error_handler, button_callback_handler, 
                      person_name_handler, agent_name_handler, agent_ic_handler, 
-                     supplier_product_handler, conversation_timeout, PERSON_NAME, AGENT_NAME, AGENT_IC, 
+                     supplier_product_handler, PERSON_NAME, AGENT_NAME, AGENT_IC, 
                      SUPPLIER_CATEGORY, SUPPLIER_PRODUCT)
 from google_services import GoogleServices
 
@@ -70,9 +70,9 @@ def main():
         fallbacks=[CommandHandler("cancel", cancel_command)],
         name="settings_conversation",
         persistent=False,
-        conversation_timeout=300,  # 5分钟超时
-        # 添加超时处理函数
-        timeout_handler=conversation_timeout
+        # 移除了以下两行：
+        # conversation_timeout=300,  # 5分钟超时
+        # timeout_handler=conversation_timeout
     )
     
     # 添加命令处理器
@@ -116,4 +116,4 @@ def main():
 
 # 仅当直接运行此脚本时执行main函数
 if __name__ == "__main__":
-    main() 
+    main()
