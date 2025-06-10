@@ -51,8 +51,20 @@ CALLBACK_PREFIX = {
     'SUPPLIER_CAT': 'supplier_cat'
 }
 
+# 添加这个新函数，用于清理用户状态
+async def clear_user_state(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """清理用户状态数据"""
+    if hasattr(context, 'user_data') and context.user_data:
+        context.user_data.clear()
+    if update.effective_user.id in user_states:
+        del user_states[update.effective_user.id]
+
+# 修改start_handler函数
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """处理 /start 命令"""
+    # 清理之前的用户状态
+    await clear_user_state(update, context)
+    
     welcome_message = """
 🚀 *财务管理助手*
 
@@ -77,8 +89,12 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(welcome_message, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
 
+# 修改help_handler函数
 async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """处理 /help 命令"""
+    # 清理之前的用户状态
+    await clear_user_state(update, context)
+    
     help_message = """
 📖 *使用指南*
 
@@ -112,9 +128,12 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     """
     await update.message.reply_text(help_message, parse_mode=ParseMode.MARKDOWN)
 
-# 设置相关处理函数
+# 修改settings_handler函数
 async def settings_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """处理 /settings 命令，显示系统配置选项"""
+    # 清理之前的用户状态
+    await clear_user_state(update, context)
+    
     keyboard = [
         [InlineKeyboardButton("👤 创建负责人", callback_data=f"{CALLBACK_PREFIX['CREATE_PERSON']}")],
         [InlineKeyboardButton("🧑‍💼 创建Agent", callback_data=f"{CALLBACK_PREFIX['CREATE_AGENT']}")],
@@ -126,6 +145,7 @@ async def settings_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=reply_markup
     )
+    return MAIN_MENU
 
 async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """处理按钮回调查询"""
@@ -312,11 +332,13 @@ async def supplier_product_handler(update: Update, context: ContextTypes.DEFAULT
     
     return ConversationHandler.END
 
+# 修改cancel_command函数
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """处理 /cancel 命令，取消当前会话"""
+    # 清理之前的用户状态
+    await clear_user_state(update, context)
+    
     await update.message.reply_text("✅ 操作已取消，使用 /start 重新开始")
-    # 清除用户数据
-    context.user_data.clear()
     return ConversationHandler.END
 
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -739,3 +761,30 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "/report - 生成月度报告\n"
             "/help - 获取帮助"
         )
+
+# 添加会话超时处理函数
+async def conversation_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理会话超时"""
+    # 清理用户状态
+    if hasattr(context, 'user_data') and context.user_data:
+        context.user_data.clear()
+    
+    user_id = None
+    if update and update.effective_user:
+        user_id = update.effective_user.id
+    
+    # 清理用户状态字典
+    if user_id and user_id in user_states:
+        del user_states[user_id]
+    
+    # 如果有原来的消息，告知用户会话已超时
+    if update and update.effective_message:
+        try:
+            await update.effective_message.reply_text(
+                "⏰ 会话已超时。请使用 /start 重新开始。",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        except Exception as e:
+            logger.error(f"发送会话超时消息时出错: {e}")
+    
+    return ConversationHandler.END
