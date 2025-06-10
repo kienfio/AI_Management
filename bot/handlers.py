@@ -1,7 +1,8 @@
 import os
 import logging
 from telegram import Update
-from telegram.ext import ContextTypes
+from telegram.constants import ParseMode
+from telegram.ext import ContextTypes, ConversationHandler
 from common.google_services import GoogleServices
 from common.shared import logger
 
@@ -11,27 +12,64 @@ google_services = GoogleServices()
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """处理/start命令"""
     logger.info(f"收到/start命令，来自用户ID: {update.effective_user.id}, 用户名: {update.effective_user.username}")
-    await update.message.reply_text(
-        "欢迎使用AI财务管理助手！\n"
-        "使用 /help 查看所有可用命令。"
-    )
+    
+    welcome_message = """
+🚀 *财务管理助手*
+
+📋 *快速开始*
+┣ 📊 /add_expense — 添加支出
+┣ 💰 /categories — 支出类别  
+┣ ⚙️ /settings — 系统配置
+┗ 📈 /report — 报表生成
+
+💡 /help 详细说明 | ❌ /cancel 取消操作
+    """
+    
+    await update.message.reply_text(welcome_message, parse_mode=ParseMode.MARKDOWN)
     logger.info(f"已回复/start命令，用户ID: {update.effective_user.id}")
 
 async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """处理/help命令"""
     logger.info(f"收到/help命令，来自用户ID: {update.effective_user.id}")
-    help_text = (
-        "可用命令列表：\n"
-        "/start - 开始使用机器人\n"
-        "/help - 显示此帮助信息\n"
-        "/add_expense - 添加支出记录\n"
-        "格式：/add_expense 日期 类别 金额 描述 [备注]\n"
-        "例如：/add_expense 2024-01-01 餐饮 50 午餐\n"
-        "\n"
-        "直接发送收据照片，我会自动识别并记录支出。"
-    )
-    await update.message.reply_text(help_text)
+    
+    help_message = """
+📖 *使用指南*
+
+🔧 *基础命令*
+• /start — 主菜单
+• /help — 帮助说明
+• /cancel — 取消当前操作
+
+📊 *添加支出* (/add_expense)
+• 格式: /add_expense 日期 类别 金额 描述 [备注]
+• 例如: `/add_expense 2024-06-10 餐饮 50 午餐`
+• 支持上传收据照片
+
+💰 *支出类别* (/categories)
+• 查看所有可用类别
+• 餐饮、交通、购物等
+
+⚙️ *系统配置* (/settings)
+• 查看当前配置
+• 修改默认设置
+
+📈 *报表功能* (/report)
+• 生成当月报表
+• 指定月份查询 `/report 2024-06`
+
+💡 *小贴士：直接发送收据照片，系统会自动处理*
+    """
+    
+    await update.message.reply_text(help_message, parse_mode=ParseMode.MARKDOWN)
     logger.info(f"已回复/help命令，用户ID: {update.effective_user.id}")
+
+async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理 /cancel 命令，取消当前会话"""
+    logger.info(f"收到/cancel命令，来自用户ID: {update.effective_user.id}")
+    await update.message.reply_text("✅ 操作已取消，使用 /start 重新开始")
+    # 清除用户数据
+    context.user_data.clear()
+    return ConversationHandler.END
 
 async def add_expense_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """处理/add_expense命令"""
@@ -41,9 +79,8 @@ async def add_expense_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         if len(context.args) < 4:
             logger.warning(f"参数不足，用户ID: {update.effective_user.id}")
             await update.message.reply_text(
-                "参数不足。请使用以下格式：\n"
-                "/add_expense 日期 类别 金额 描述 [备注]\n"
-                "例如：/add_expense 2024-01-01 餐饮 50 午餐"
+                "⚠️ *参数不足*\n\n请使用以下格式：\n`/add_expense 日期 类别 金额 描述 [备注]`\n例如：`/add_expense 2024-06-10 餐饮 50 午餐`",
+                parse_mode=ParseMode.MARKDOWN
             )
             return
 
@@ -59,24 +96,29 @@ async def add_expense_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         # 添加支出记录
         if google_services.add_expense(date, category, amount, description, note):
             logger.info(f"支出记录添加成功，用户ID: {update.effective_user.id}")
-            await update.message.reply_text(
-                f"✅ 支出记录已添加\n"
-                f"日期：{date}\n"
-                f"类别：{category}\n"
-                f"金额：{amount}\n"
-                f"描述：{description}\n"
-                f"备注：{note}"
-            )
+            
+            success_message = f"""
+✅ *支出记录已添加*
+
+📅 日期：`{date}`
+🏷️ 类别：`{category}`
+💰 金额：`{amount}`
+📝 描述：`{description}`
+"""
+            if note:
+                success_message += f"📌 备注：`{note}`"
+                
+            await update.message.reply_text(success_message, parse_mode=ParseMode.MARKDOWN)
         else:
             logger.error(f"支出记录添加失败，用户ID: {update.effective_user.id}")
             await update.message.reply_text("❌ 添加支出记录失败，请稍后重试")
 
     except ValueError:
         logger.error(f"金额格式错误，用户ID: {update.effective_user.id}")
-        await update.message.reply_text("金额格式错误，请输入有效的数字")
+        await update.message.reply_text("⚠️ 金额格式错误，请输入有效的数字")
     except Exception as e:
         logger.error(f"处理add_expense命令时出错: {e}, 用户ID: {update.effective_user.id}")
-        await update.message.reply_text("发生错误，请稍后重试")
+        await update.message.reply_text("⚠️ 发生错误，请稍后重试")
 
 async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """处理收据照片"""
@@ -98,11 +140,18 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             if file_url:
                 logger.info(f"照片上传成功，URL: {file_url}")
-                await update.message.reply_text(
-                    "✅ 收据已上传\n"
-                    "请使用 /add_expense 命令添加支出记录，并在备注中包含此链接：\n"
-                    f"{file_url}"
-                )
+                
+                success_message = f"""
+📸 *收据已上传成功*
+
+请使用 /add_expense 命令添加支出记录：
+`/add_expense 日期 类别 金额 描述 收据链接`
+
+例如：
+`/add_expense 2024-06-10 餐饮 50 午餐 {file_url}`
+"""
+                
+                await update.message.reply_text(success_message, parse_mode=ParseMode.MARKDOWN)
             else:
                 logger.error(f"照片上传失败，用户ID: {update.effective_user.id}")
                 await update.message.reply_text("❌ 收据上传失败，请稍后重试")
@@ -115,16 +164,104 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
     except Exception as e:
         logger.error(f"处理照片时出错: {e}, 用户ID: {update.effective_user.id}")
-        await update.message.reply_text("处理照片时出错，请稍后重试")
+        await update.message.reply_text("⚠️ 处理照片时出错，请稍后重试")
 
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def categories_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """处理/categories命令"""
+    logger.info(f"收到/categories命令，来自用户ID: {update.effective_user.id}")
+    
+    categories_message = """
+📋 *支出类别列表*
+
+• 🍔 餐饮 - 餐厅、外卖、咖啡等
+• 🚌 交通 - 公交、地铁、打车等
+• 🛒 购物 - 日用品、衣物等
+• 🎬 娱乐 - 电影、游戏等
+• 🏠 居住 - 房租、水电等
+• 💊 医疗 - 药品、诊疗等
+• 📚 教育 - 书籍、课程等
+• 📱 通讯 - 话费、网费等
+• 🔧 其他 - 未分类支出
+
+使用 `/add_expense` 命令时请使用以上类别
+"""
+    
+    await update.message.reply_text(categories_message, parse_mode=ParseMode.MARKDOWN)
+    logger.info(f"已回复/categories命令，用户ID: {update.effective_user.id}")
+
+async def settings_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """处理/settings命令"""
+    logger.info(f"收到/settings命令，来自用户ID: {update.effective_user.id}")
+    
+    settings_message = """
+⚙️ *系统设置*
+
+当前配置:
+• 📊 数据同步: Google Sheets
+• 📁 文件存储: Google Drive
+• 🔔 提醒功能: 已禁用
+• 📅 报表周期: 月度
+
+*功能开发中，敬请期待...*
+"""
+    
+    await update.message.reply_text(settings_message, parse_mode=ParseMode.MARKDOWN)
+    logger.info(f"已回复/settings命令，用户ID: {update.effective_user.id}")
+
+async def report_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """处理/report命令"""
+    logger.info(f"收到/report命令，来自用户ID: {update.effective_user.id}")
+    
+    report_message = """
+📊 *报表功能*
+
+*功能开发中，敬请期待...*
+
+将支持:
+• 📅 按月份生成报表
+• 📊 支出分类统计
+• 📈 消费趋势分析
+• 📑 自定义报表导出
+"""
+    
+    await update.message.reply_text(report_message, parse_mode=ParseMode.MARKDOWN)
+    logger.info(f"已回复/report命令，用户ID: {update.effective_user.id}")
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     """处理错误"""
-    logger.error(f"更新 {update} 导致错误 {context.error}")
-    try:
-        if update and update.effective_message:
-            await update.effective_message.reply_text("抱歉，处理您的请求时出错了。请稍后重试。")
-    except Exception as e:
-        logger.error(f"发送错误消息时出错: {e}")
+    # 获取异常信息
+    error = context.error
+    
+    # 记录详细的错误信息
+    logger.error("发生异常:", exc_info=context.error)
+    if update:
+        logger.error(f"更新信息: {update}")
+    if hasattr(context, 'user_data'):
+        logger.error(f"用户数据: {context.user_data}")
+    if hasattr(context, 'chat_data'):
+        logger.error(f"聊天数据: {context.chat_data}")
+    
+    # 根据错误类型返回不同的用户提示
+    error_message = "⚠️ 处理请求时发生错误"
+    
+    if "Application was not initialized" in str(error):
+        error_message = "🔄 系统正在初始化，请稍后重试"
+    elif "Event loop is closed" in str(error):
+        error_message = "⏳ 系统繁忙，请稍后重试"
+    elif "Conversation handler timeout" in str(error):
+        error_message = "⏰ 会话已超时，请重新开始"
+    elif "Message is not modified" in str(error):
+        # 这种情况不需要通知用户
+        return
+    
+    # 发送错误消息给用户
+    if update and isinstance(update, Update) and update.effective_message:
+        try:
+            await update.effective_message.reply_text(
+                f"{error_message}\n\n如需帮助请联系管理员 👨‍💻"
+            )
+        except Exception as e:
+            logger.error(f"发送错误消息时出错: {e}")
 
 # 导出所有处理函数
 __all__ = [
@@ -132,5 +269,9 @@ __all__ = [
     'help_handler',
     'add_expense_handler',
     'photo_handler',
+    'cancel_handler',
+    'categories_handler',
+    'settings_handler',
+    'report_handler',
     'error_handler'
 ] 
