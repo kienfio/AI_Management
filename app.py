@@ -2,6 +2,7 @@ import os
 import threading
 import logging
 import atexit
+import time
 from flask import Flask, render_template, jsonify
 from main import main as start_bot
 
@@ -16,29 +17,58 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # 状态变量
-bot_status = {"running": False, "start_time": None}
+bot_status = {"running": False, "start_time": None, "restart_count": 0}
 bot_thread = None
+bot_lock = threading.Lock()
 
 def cleanup():
     """清理函数，确保在应用关闭时正确关闭机器人"""
-    global bot_thread
-    if bot_thread and bot_thread.is_alive():
-        logger.info("正在关闭机器人线程...")
-        # 机器人的关闭逻辑在main.py中的signal handler中处理
-        bot_thread.join(timeout=5)
-        logger.info("机器人线程已关闭")
+    global bot_thread, bot_status
+    with bot_lock:
+        if bot_thread and bot_thread.is_alive():
+            logger.info("正在关闭机器人线程...")
+            bot_status["running"] = False
+            bot_thread.join(timeout=5)
+            logger.info("机器人线程已关闭")
 
 # 注册清理函数
 atexit.register(cleanup)
 
-# 启动Telegram机器人的线程
 def run_telegram_bot():
+    """运行Telegram机器人的线程函数"""
+    global bot_status
     try:
         logger.info("正在启动Telegram机器人...")
+        with bot_lock:
+            bot_status["restart_count"] += 1
         start_bot()
     except Exception as e:
         logger.error(f"启动机器人时出错: {e}")
-        bot_status["running"] = False
+    finally:
+        with bot_lock:
+            bot_status["running"] = False
+
+def ensure_single_instance():
+    """确保只有一个机器人实例在运行"""
+    global bot_thread, bot_status
+    with bot_lock:
+        # 如果有正在运行的线程，先停止它
+        if bot_thread and bot_thread.is_alive():
+            logger.info("检测到现有机器人实例，正在停止...")
+            bot_status["running"] = False
+            bot_thread.join(timeout=5)
+            if bot_thread.is_alive():
+                logger.warning("无法正常停止现有实例")
+                return False
+        
+        # 启动新的线程
+        bot_status["running"] = True
+        bot_status["start_time"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        bot_thread = threading.Thread(target=run_telegram_bot)
+        bot_thread.daemon = True
+        bot_thread.start()
+        logger.info("新的机器人实例已启动")
+        return True
 
 # 路由：主页
 @app.route('/')
@@ -69,16 +99,25 @@ def health():
         "port": os.environ.get('PORT', 5000)
     })
 
+# 路由：重启机器人
+@app.route('/restart')
+def restart_bot():
+    if ensure_single_instance():
+        return jsonify({
+            "status": "success",
+            "message": "机器人已重启",
+            "bot_status": bot_status
+        })
+    else:
+        return jsonify({
+            "status": "error",
+            "message": "重启失败",
+            "bot_status": bot_status
+        }), 500
+
 # 启动机器人线程
-if not bot_status["running"]:
-    bot_thread = threading.Thread(target=run_telegram_bot)
-    bot_thread.daemon = True  # 设置为守护线程，这样它会在主程序结束时终止
-    bot_thread.start()
-    bot_status["running"] = True
-    import datetime
-    bot_status["start_time"] = datetime.datetime.now().isoformat()
-    logger.info("机器人后台线程已启动")
-    
+ensure_single_instance()
+
 # 记录端口信息
 port = os.environ.get('PORT', 5000)
 logger.info(f"Flask应用准备在端口 {port} 上启动")
