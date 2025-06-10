@@ -9,3 +9,5 @@ pandas==2.2.1
 psutil==5.9.8
 requests==2.31.0
 numpy==1.24.3
+asgiref==3.7.2
+uvicorn==0.27.1
