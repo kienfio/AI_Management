@@ -194,8 +194,16 @@ async def sales_person_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def sales_amount_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """处理发票金额输入"""
+    logger.info(f"接收到金额输入: {update.message.text}")
+    
     try:
-        amount = float(update.message.text.strip())
+        amount_text = update.message.text.strip()
+        # 检查金额格式
+        # 尝试移除千位分隔符和货币符号，如果有的话
+        clean_amount = amount_text.replace(',', '').replace('¥', '').replace('$', '').replace('€', '')
+        amount = float(clean_amount)
+        
+        logger.info(f"解析后的金额: {amount}")
         context.user_data['sales_amount'] = amount
         
         keyboard = [
@@ -210,9 +218,15 @@ async def sales_amount_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             parse_mode=ParseMode.HTML,
             reply_markup=reply_markup
         )
+        logger.info(f"金额处理完成，等待客户类型选择")
         return SALES_CLIENT
-    except ValueError:
-        await update.message.reply_text("⚠️ Please enter a valid amount")
+    except ValueError as e:
+        logger.error(f"金额解析错误: {e}")
+        await update.message.reply_text("⚠️ 请输入有效的金额数字")
+        return SALES_AMOUNT
+    except Exception as e:
+        logger.error(f"处理金额时发生未知错误: {e}")
+        await update.message.reply_text("❌ 处理出错，请重新输入金额")
         return SALES_AMOUNT
 
 async def sales_client_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -862,56 +876,10 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     
     # 各功能菜单回调
     elif query.data == "menu_sales":
-        # 直接进入新增销售记录功能，而不是显示销售管理菜单
-        # 清除用户数据
-        context.user_data.clear()
-        
-        try:
-            # 获取负责人列表
-            sheets_manager = SheetsManager()
-            pics = sheets_manager.get_pics(active_only=True)
-            
-            if not pics:
-                # 如果没有负责人数据，显示提示信息
-                keyboard = [[InlineKeyboardButton("⚙️ 创建负责人", callback_data="setting_create_pic")],
-                            [InlineKeyboardButton("❌ 取消", callback_data="back_main")]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                
-                await query.edit_message_text(
-                    "⚠️ <b>未找到负责人数据</b>\n\n请先创建负责人后再使用此功能。",
-                    parse_mode=ParseMode.HTML,
-                    reply_markup=reply_markup
-                )
-                return ConversationHandler.END
-            
-            # 创建负责人选择按钮
-            keyboard = []
-            for pic in pics:
-                # 使用姓名作为按钮文本
-                name = pic.get('姓名', '')
-                if name:
-                    keyboard.append([InlineKeyboardButton(f"👤 {name}", callback_data=f"pic_{name}")])
-            
-            # 添加取消按钮
-            keyboard.append([InlineKeyboardButton("❌ 取消", callback_data="back_main")])
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await query.edit_message_text(
-                "👤 <b>请选择负责人:</b>",
-                parse_mode=ParseMode.HTML,
-                reply_markup=reply_markup
-            )
-            
-            # 返回的是新的状态，因为我们需要一个回调来处理选择
-            return SALES_PERSON
-            
-        except Exception as e:
-            logger.error(f"获取负责人列表失败: {e}")
-            await query.edit_message_text(
-                "❌ <b>获取负责人数据失败</b>\n\n请稍后再试。",
-                parse_mode=ParseMode.HTML
-            )
-            return ConversationHandler.END
+        # 这里不做任何处理，因为menu_sales回调已经在ConversationHandler的entry_points中处理
+        # 只是为了防止出错，所以保留这个分支
+        logger.info("menu_sales回调被触发，但由ConversationHandler处理")
+        return ConversationHandler.END
     elif query.data == "menu_cost":
         return await cost_menu(update, context)
     elif query.data == "menu_report":
@@ -1091,7 +1059,9 @@ def get_conversation_handlers():
     sales_conversation = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(sales_add_start, pattern="^sales_add$"),
-            CommandHandler("SaleInvoice", sale_invoice_command)
+            CommandHandler("SaleInvoice", sale_invoice_command),
+            # 添加菜单入口点
+            CallbackQueryHandler(lambda u, c: sale_invoice_command(u, c), pattern="^menu_sales$")
         ],
         states={
             SALES_PERSON: [
@@ -1382,9 +1352,12 @@ async def setting_type_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     return ConversationHandler.END
 
 async def sale_invoice_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理 /SaleInvoice 命令 - 直接开始添加销售记录"""
+    """处理 /SaleInvoice 命令或 menu_sales 回调 - 直接开始添加销售记录"""
     # 清除用户数据
     context.user_data.clear()
+    
+    # 判断是命令还是回调查询
+    is_callback = update.callback_query is not None
     
     try:
         # 获取负责人列表
@@ -1397,11 +1370,20 @@ async def sale_invoice_command(update: Update, context: ContextTypes.DEFAULT_TYP
                         [InlineKeyboardButton("❌ 取消", callback_data="back_main")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            await update.message.reply_text(
-                "⚠️ <b>未找到负责人数据</b>\n\n请先创建负责人后再使用此功能。",
-                parse_mode=ParseMode.HTML,
-                reply_markup=reply_markup
-            )
+            message = "⚠️ <b>未找到负责人数据</b>\n\n请先创建负责人后再使用此功能。"
+            
+            if is_callback:
+                await update.callback_query.edit_message_text(
+                    message,
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=reply_markup
+                )
+            else:
+                await update.message.reply_text(
+                    message,
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=reply_markup
+                )
             return ConversationHandler.END
         
         # 创建负责人选择按钮
@@ -1416,19 +1398,37 @@ async def sale_invoice_command(update: Update, context: ContextTypes.DEFAULT_TYP
         keyboard.append([InlineKeyboardButton("❌ 取消", callback_data="back_main")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await update.message.reply_text(
-            "👤 <b>请选择负责人:</b>",
-            parse_mode=ParseMode.HTML,
-            reply_markup=reply_markup
-        )
+        message = "👤 <b>请选择负责人:</b>"
         
+        if is_callback:
+            await update.callback_query.edit_message_text(
+                message,
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
+            )
+        else:
+            await update.message.reply_text(
+                message,
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
+            )
+        
+        logger.info("已显示负责人选择界面")
         # 返回的是新的状态，因为我们需要一个回调来处理选择
         return SALES_PERSON
         
     except Exception as e:
         logger.error(f"获取负责人列表失败: {e}")
-        await update.message.reply_text(
-            "❌ <b>获取负责人数据失败</b>\n\n请稍后再试。",
-            parse_mode=ParseMode.HTML
-        )
+        error_message = "❌ <b>获取负责人数据失败</b>\n\n请稍后再试。"
+        
+        if is_callback:
+            await update.callback_query.edit_message_text(
+                error_message,
+                parse_mode=ParseMode.HTML
+            )
+        else:
+            await update.message.reply_text(
+                error_message,
+                parse_mode=ParseMode.HTML
+            )
         return ConversationHandler.END
