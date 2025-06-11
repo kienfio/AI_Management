@@ -40,6 +40,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         [InlineKeyboardButton("📊 销售记录", callback_data="menu_sales")],
         [InlineKeyboardButton("💰 费用管理", callback_data="menu_cost")],
         [InlineKeyboardButton("📈 报表生成", callback_data="menu_report")],
+        [InlineKeyboardButton("⚙️ 系统设置", callback_data="menu_setting")],
         [InlineKeyboardButton("❓ 帮助说明", callback_data="menu_help")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -52,6 +53,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 📊 *销售记录* - 登记发票和佣金
 💰 *费用管理* - 记录各项支出
 📈 *报表生成* - 查看统计报告
+⚙️ *系统设置* - 创建代理商/供应商
     """
     
     if update.callback_query:
@@ -702,6 +704,25 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
         return await cost_menu(update, context)
     elif query.data == "menu_report":
         return await report_menu(update, context)
+    elif query.data == "menu_setting":
+        # 模拟直接调用Setting命令
+        context.user_data.clear()
+        
+        keyboard = [
+            [InlineKeyboardButton("Create Agent", callback_data="setting_create_agent")],
+            [InlineKeyboardButton("Create Supplier", callback_data="setting_create_supplier")],
+            [InlineKeyboardButton("Create Worker", callback_data="setting_create_worker")],
+            [InlineKeyboardButton("Create Person in Charge", callback_data="setting_create_pic")],
+            [InlineKeyboardButton("🔙 返回主菜单", callback_data="back_main")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "⚙️ *系统设置*\n\n请选择要创建的类型：",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=reply_markup
+        )
+        return SETTING_CATEGORY
     elif query.data == "menu_help":
         await help_command(update, context)
         return ConversationHandler.END
