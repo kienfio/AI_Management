@@ -17,13 +17,17 @@ SHEET_NAMES = {
     'sales': '销售记录',
     'expenses': '费用记录', 
     'agents': '代理商管理',
-    'suppliers': '供应商管理'
+    'suppliers': '供应商管理',
+    'workers': '工作人员管理',
+    'pic': '负责人管理'
 }
 
 SALES_HEADERS = ['日期', '销售人员', '发票金额', '客户类型', '佣金比例', '佣金金额', '备注']
 EXPENSES_HEADERS = ['日期', '费用类型', '供应商', '金额', '类别', '备注']
 AGENTS_HEADERS = ['姓名', '联系人', '电话', '邮箱', '佣金比例', '状态']
 SUPPLIERS_HEADERS = ['供应商名称', '联系人', '电话', '邮箱', '产品/服务', '状态']
+WORKERS_HEADERS = ['姓名', '联系人', '电话', '职位', '状态']
+PICS_HEADERS = ['姓名', '联系人', '电话', '部门', '状态']
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +158,10 @@ class GoogleSheetsManager:
                     worksheet.append_row(AGENTS_HEADERS)
                 elif sheet_key == 'suppliers':
                     worksheet.append_row(SUPPLIERS_HEADERS)
+                elif sheet_key == 'workers':
+                    worksheet.append_row(WORKERS_HEADERS)
+                elif sheet_key == 'pic':
+                    worksheet.append_row(PICS_HEADERS)
                 
                 logger.info(f"✅ 创建工作表: {sheet_name}")
     
@@ -358,6 +366,96 @@ class GoogleSheetsManager:
             
         except Exception as e:
             logger.error(f"❌ 获取供应商列表失败: {e}")
+            return []
+    
+    # =============================================================================
+    # 工作人员管理
+    # =============================================================================
+    
+    def add_worker(self, data: Dict[str, Any]) -> bool:
+        """添加工作人员"""
+        try:
+            worksheet = self.get_worksheet(SHEET_NAMES['workers'])
+            if not worksheet:
+                return False
+            
+            row_data = [
+                data.get('name', ''),
+                data.get('contact', ''),
+                data.get('phone', ''),
+                data.get('position', ''),
+                data.get('status', '激活')
+            ]
+            
+            worksheet.append_row(row_data)
+            logger.info(f"✅ 工作人员添加成功: {data.get('name')}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ 添加工作人员失败: {e}")
+            return False
+    
+    def get_workers(self, active_only: bool = True) -> List[Dict]:
+        """获取工作人员列表"""
+        try:
+            worksheet = self.get_worksheet(SHEET_NAMES['workers'])
+            if not worksheet:
+                return []
+            
+            records = worksheet.get_all_records()
+            
+            if active_only:
+                return [r for r in records if r.get('状态') == '激活']
+            
+            return records
+            
+        except Exception as e:
+            logger.error(f"❌ 获取工作人员列表失败: {e}")
+            return []
+    
+    # =============================================================================
+    # 负责人管理
+    # =============================================================================
+    
+    def add_pic(self, data: Dict[str, Any]) -> bool:
+        """添加负责人"""
+        try:
+            worksheet = self.get_worksheet(SHEET_NAMES['pic'])
+            if not worksheet:
+                return False
+            
+            row_data = [
+                data.get('name', ''),
+                data.get('contact', ''),
+                data.get('phone', ''),
+                data.get('department', ''),
+                data.get('status', '激活')
+            ]
+            
+            worksheet.append_row(row_data)
+            logger.info(f"✅ 负责人添加成功: {data.get('name')}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ 添加负责人失败: {e}")
+            return False
+    
+    def get_pics(self, active_only: bool = True) -> List[Dict]:
+        """获取负责人列表"""
+        try:
+            worksheet = self.get_worksheet(SHEET_NAMES['pic'])
+            if not worksheet:
+                return []
+            
+            records = worksheet.get_all_records()
+            
+            if active_only:
+                return [r for r in records if r.get('状态') == '激活']
+            
+            return records
+            
+        except Exception as e:
+            logger.error(f"❌ 获取负责人列表失败: {e}")
             return []
     
     # =============================================================================
