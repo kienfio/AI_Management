@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # ====================================
 
 # 销售记录状态
-SALES_PERSON, SALES_AMOUNT, SALES_CLIENT, SALES_CONFIRM = range(4)
+SALES_PERSON, SALES_AMOUNT, SALES_CLIENT, SALES_COMMISSION_TYPE, SALES_COMMISSION_PERCENT, SALES_COMMISSION_AMOUNT, SALES_AGENT_SELECT, SALES_CONFIRM = range(8)
 
 # 费用管理状态
 COST_TYPE, COST_SUPPLIER, COST_AMOUNT, COST_DESC, COST_RECEIPT, COST_CONFIRM = range(6)
@@ -917,6 +917,65 @@ async def cost_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     # 继续到确认页面
     return await show_cost_confirmation(update, context)
 
+async def show_cost_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """显示费用确认信息"""
+    # 生成确认信息
+    cost_type = context.user_data['cost_type']
+    amount = context.user_data['cost_amount']
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Save", callback_data="cost_save")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # 构建确认消息
+    if cost_type == "Purchasing":
+        supplier = context.user_data.get('cost_supplier', '')
+        confirm_message = f"""
+💵 <b>EXPENSE CONFIRMATION</b>
+
+📋 <b>Type:</b> {cost_type}
+🏭 <b>Supplier:</b> {supplier}
+💰 <b>Amount:</b> RM{amount:,.2f}
+
+<b>Please confirm the information:</b>
+        """
+    elif cost_type == "Billing":
+        desc = context.user_data.get('cost_desc', '')
+        confirm_message = f"""
+💵 <b>EXPENSE CONFIRMATION</b>
+
+📋 <b>Type:</b> {cost_type}
+📝 <b>Item:</b> {desc}
+💰 <b>Amount:</b> RM{amount:,.2f}
+
+<b>Please confirm the information:</b>
+        """
+    else:  # Worker Salary
+        confirm_message = f"""
+💵 <b>EXPENSE CONFIRMATION</b>
+
+📋 <b>Type:</b> {cost_type}
+💰 <b>Amount:</b> RM{amount:,.2f}
+
+<b>Please confirm the information:</b>
+        """
+    
+    if update.message:
+        await update.message.reply_html(
+            confirm_message,
+            reply_markup=reply_markup
+        )
+    else:
+        await update.callback_query.edit_message_text(
+            confirm_message,
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+    
+    return COST_CONFIRM
+
 # ====================================
 # 报表生成区 - 月度报表、自定义查询
 # ====================================
@@ -1742,15 +1801,53 @@ async def sale_invoice_command(update: Update, context: ContextTypes.DEFAULT_TYP
                     reply_markup=reply_markup
                 )
             return ConversationHandler.END
+            
+        # 创建负责人选择按钮
+        keyboard = []
+        for pic in pics:
+            # 使用姓名作为按钮文本
+            name = pic.get('姓名', '')
+            if name:
+                keyboard.append([InlineKeyboardButton(f"👤 {name}", callback_data=f"pic_{name}")])
         
-    else:
-        await update.callback_query.edit_message_text(
-            confirm_message,
-            parse_mode=ParseMode.HTML,
-            reply_markup=reply_markup
-        )
-    
-    return COST_CONFIRM
+        # 添加取消按钮
+        keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="back_main")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        message = "👤 <b>Select Person in Charge:</b>"
+        
+        if is_callback:
+            await update.callback_query.edit_message_text(
+                message,
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
+            )
+        else:
+            await update.message.reply_text(
+                message,
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
+            )
+        
+        logger.info("已显示负责人选择界面")
+        # 返回的是新的状态，因为我们需要一个回调来处理选择
+        return SALES_PERSON
+        
+    except Exception as e:
+        logger.error(f"获取负责人列表失败: {e}")
+        error_message = "❌ <b>Failed to get person in charge data</b>\n\nPlease try again later."
+        
+        if is_callback:
+            await update.callback_query.edit_message_text(
+                error_message,
+                parse_mode=ParseMode.HTML
+            )
+        else:
+            await update.message.reply_text(
+                error_message,
+                parse_mode=ParseMode.HTML
+            )
+        return ConversationHandler.END
 
 async def cost_list_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """查看费用记录"""
@@ -1894,3 +1991,52 @@ async def setting_rate_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     except ValueError:
         await update.message.reply_text("⚠️ <b>Invalid format</b>\n\nPlease enter a valid percentage (e.g. 5 or 5%).", parse_mode=ParseMode.HTML)
         return SETTING_RATE
+
+async def sales_agent_select_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理代理商选择"""
+    query = update.callback_query
+    await query.answer()
+    
+    agent_data = query.data
+    if agent_data.startswith("agent_"):
+        # 解析代理商数据 agent_{name}_{commission}
+        parts = agent_data[6:].split('_')
+        if len(parts) >= 1:
+            agent_name = parts[0]
+            context.user_data['sales_agent'] = agent_name
+            
+            # 获取代理商默认佣金比例（如果有）
+            default_commission = ""
+            if len(parts) >= 2:
+                default_commission = parts[1]
+            
+            # 显示佣金计算方式选择界面
+            amount = context.user_data['sales_amount']
+            
+            keyboard = [
+                [InlineKeyboardButton("💯 Set Commission Percentage", callback_data="commission_percent")],
+                [InlineKeyboardButton("💰 Enter Fixed Commission Amount", callback_data="commission_amount")],
+                [InlineKeyboardButton("❌ Cancel", callback_data="back_main")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            message = f"""
+🤝 <b>Agent:</b> {agent_name}
+💰 <b>Amount:</b> RM{amount:,.2f}
+{f"💵 <b>Default Commission Rate:</b> {default_commission}" if default_commission else ""}
+
+<b>Please select commission calculation method:</b>
+"""
+            
+            await query.edit_message_text(
+                message,
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
+            )
+            
+            # 返回佣金计算方式选择状态
+            return SALES_COMMISSION_TYPE
+    
+    # 未知回调数据
+    await query.edit_message_text("❌ Unknown operation, please start again")
+    return ConversationHandler.END
