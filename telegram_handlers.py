@@ -237,12 +237,12 @@ async def sales_client_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     client_type = "Company" if query.data == "client_company" else "Agent"
     context.user_data['sales_client'] = client_type
     
-    # 如果选择的是公司，直接进入确认步骤
+    # 如果选择的是公司，直接进入确认步骤，不计算佣金
     if client_type == "Company":
-        # 计算佣金 (示例: 公司5%)
+        # 公司类型不需要计算佣金
         amount = context.user_data['sales_amount']
-        commission_rate = 0.05
-        commission = amount * commission_rate
+        commission_rate = 0  # 设置为0，表示没有佣金
+        commission = 0  # 佣金金额为0
         context.user_data['sales_commission'] = commission
         context.user_data['commission_rate'] = commission_rate
         
@@ -483,7 +483,6 @@ async def show_sales_confirmation(update: Update, context: ContextTypes.DEFAULT_
     """显示销售记录确认信息"""
     keyboard = [
         [InlineKeyboardButton("✅ Save", callback_data="sales_save")],
-        [InlineKeyboardButton("✏️ Edit", callback_data="sales_add")],
         [InlineKeyboardButton("❌ Cancel", callback_data="back_main")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -499,8 +498,10 @@ async def show_sales_confirmation(update: Update, context: ContextTypes.DEFAULT_
     # 构建确认消息
     if client_type == "Agent":
         client_display = f"{client_type}: {agent}"
+        commission_display = f"💵 <b>Commission:</b> RM{commission:,.2f} ({commission_rate:.1f}%)"
     else:
         client_display = client_type
+        commission_display = ""  # 公司类型不显示佣金信息
     
     confirm_message = f"""
 📊 <b>INVOICE CONFIRMATION</b>
@@ -508,7 +509,7 @@ async def show_sales_confirmation(update: Update, context: ContextTypes.DEFAULT_
 👤 <b>Person in Charge:</b> {person}
 💰 <b>Amount:</b> RM{amount:,.2f}
 🎯 <b>Client Type:</b> {client_display}
-💵 <b>Commission:</b> RM{commission:,.2f} ({commission_rate:.1f}%)
+{commission_display}
 
 <b>Please confirm the information:</b>
     """
@@ -1068,8 +1069,6 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     # 销售记录回调
     elif query.data == "back_sales":
         return await sales_menu(update, context)
-    elif query.data == "sales_add":
-        return await sales_add_start(update, context)
     elif query.data == "sales_list":
         await sales_list_handler(update, context)
         return ConversationHandler.END
@@ -1232,7 +1231,10 @@ def get_conversation_handlers():
             SALES_COMMISSION_PERCENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, sales_commission_percent_handler)],
             SALES_COMMISSION_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, sales_commission_amount_handler)],
             SALES_AGENT_SELECT: [CallbackQueryHandler(sales_agent_select_handler, pattern="^agent_")],
-            SALES_CONFIRM: [CallbackQueryHandler(sales_save_handler, pattern="^sales_save$")]
+            SALES_CONFIRM: [
+                CallbackQueryHandler(sales_save_handler, pattern="^sales_save$"),
+                CallbackQueryHandler(lambda u, c: start_command(u, c), pattern="^back_main$")
+            ]
         },
         fallbacks=[
             CallbackQueryHandler(callback_query_handler),
