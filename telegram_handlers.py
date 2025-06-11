@@ -156,17 +156,40 @@ async def sales_add_start(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     return SALES_PERSON
 
 async def sales_person_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理负责人输入"""
-    context.user_data['sales_person'] = update.message.text.strip()
+    """处理负责人选择"""
+    query = update.callback_query
+    if not query:
+        # 如果不是按钮点击，可能是直接输入文本，这里我们直接存储文本
+        context.user_data['sales_person'] = update.message.text.strip()
+    else:
+        # 处理按钮点击，格式为pic_{name}
+        await query.answer()
+        person_data = query.data
+        if person_data.startswith("pic_"):
+            context.user_data['sales_person'] = person_data[4:]  # 去掉"pic_"前缀
+        else:
+            # 未知回调数据
+            await query.edit_message_text("❌ 未知操作，请重新开始")
+            return ConversationHandler.END
     
     keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_main")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(
-        f"👤 <b>Person in Charge:</b> {context.user_data['sales_person']}\n\n💰 <b>Enter Amount:</b>",
-        parse_mode=ParseMode.HTML,
-        reply_markup=reply_markup
-    )
+    message = f"👤 <b>Person in Charge:</b> {context.user_data['sales_person']}\n\n💰 <b>Enter Amount:</b>"
+    
+    if query:
+        await query.edit_message_text(
+            message,
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+    else:
+        await update.message.reply_text(
+            message,
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+    
     return SALES_AMOUNT
 
 async def sales_amount_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -200,12 +223,114 @@ async def sales_client_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     client_type = "Company" if query.data == "client_company" else "Agent"
     context.user_data['sales_client'] = client_type
     
-    # 计算佣金 (示例: 公司5%, 代理8%)
-    amount = context.user_data['sales_amount']
-    commission_rate = 0.05 if client_type == "Company" else 0.08
-    commission = amount * commission_rate
-    context.user_data['sales_commission'] = commission
+    # 如果选择的是公司，直接进入确认步骤
+    if client_type == "Company":
+        # 计算佣金 (示例: 公司5%)
+        amount = context.user_data['sales_amount']
+        commission_rate = 0.05
+        commission = amount * commission_rate
+        context.user_data['sales_commission'] = commission
+        context.user_data['commission_rate'] = commission_rate
+        
+        # 跳转到确认界面
+        return await show_sales_confirmation(update, context)
     
+    # 如果选择的是代理商，获取代理商列表
+    try:
+        # 获取代理商列表
+        sheets_manager = SheetsManager()
+        agents = sheets_manager.get_agents(active_only=True)
+        
+        if not agents:
+            # 如果没有代理商数据，显示提示信息
+            keyboard = [[InlineKeyboardButton("⚙️ 创建代理商", callback_data="setting_create_agent")],
+                        [InlineKeyboardButton("❌ 取消", callback_data="back_main")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                "⚠️ <b>未找到代理商数据</b>\n\n请先创建代理商后再使用此功能。",
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
+            )
+            return ConversationHandler.END
+        
+        # 创建代理商选择按钮
+        keyboard = []
+        for agent in agents:
+            # 使用姓名作为按钮文本
+            name = agent.get('姓名', '')
+            commission = agent.get('佣金比例', '')
+            display_text = f"{name}"
+            if commission:
+                display_text += f" ({commission})"
+                
+            if name:
+                keyboard.append([InlineKeyboardButton(f"🤝 {display_text}", callback_data=f"agent_{name}_{commission}")])
+        
+        # 添加取消按钮
+        keyboard.append([InlineKeyboardButton("❌ 取消", callback_data="back_main")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "🤝 <b>请选择代理商:</b>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+        
+        # 返回一个新的状态用于处理代理商选择
+        return SALES_AGENT_SELECT
+        
+    except Exception as e:
+        logger.error(f"获取代理商列表失败: {e}")
+        await query.edit_message_text(
+            "❌ <b>获取代理商数据失败</b>\n\n请稍后再试。",
+            parse_mode=ParseMode.HTML
+        )
+        return ConversationHandler.END
+
+# 添加一个新的状态常量
+SALES_AGENT_SELECT = 20  # 使用一个新的状态码
+
+# 添加代理商选择处理函数
+async def sales_agent_select_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理代理商选择"""
+    query = update.callback_query
+    await query.answer()
+    
+    agent_data = query.data
+    if agent_data.startswith("agent_"):
+        # 解析代理商数据 agent_{name}_{commission}
+        parts = agent_data[6:].split('_')
+        if len(parts) >= 1:
+            agent_name = parts[0]
+            context.user_data['sales_agent'] = agent_name
+            
+            # 如果有佣金比例，解析并计算佣金
+            commission_rate = 0.08  # 默认佣金比例
+            if len(parts) >= 2 and parts[1]:
+                try:
+                    # 尝试解析佣金比例，可能是 "5%" 这样的格式
+                    commission_str = parts[1].replace('%', '')
+                    commission_rate = float(commission_str) / 100
+                except ValueError:
+                    pass
+            
+            amount = context.user_data['sales_amount']
+            commission = amount * commission_rate
+            
+            context.user_data['sales_commission'] = commission
+            context.user_data['commission_rate'] = commission_rate
+            
+            # 跳转到确认界面
+            return await show_sales_confirmation(update, context)
+    
+    # 未知回调数据
+    await query.edit_message_text("❌ 未知操作，请重新开始")
+    return ConversationHandler.END
+
+# 创建一个辅助函数来显示确认信息
+async def show_sales_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """显示销售记录确认信息"""
     keyboard = [
         [InlineKeyboardButton("✅ Save", callback_data="sales_save")],
         [InlineKeyboardButton("✏️ Edit", callback_data="sales_add")],
@@ -213,22 +338,44 @@ async def sales_client_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
+    # 获取数据
+    amount = context.user_data['sales_amount']
+    client_type = context.user_data['sales_client']
+    commission = context.user_data['sales_commission']
+    commission_rate = context.user_data.get('commission_rate', 0) * 100
+    person = context.user_data['sales_person']
+    agent = context.user_data.get('sales_agent', '')
+    
+    # 构建确认消息
+    if client_type == "Agent":
+        client_display = f"{client_type}: {agent}"
+    else:
+        client_display = client_type
+    
     confirm_message = f"""
 📊 <b>INVOICE CONFIRMATION</b>
 
-👤 <b>Person in Charge:</b> {context.user_data['sales_person']}
+👤 <b>Person in Charge:</b> {person}
 💰 <b>Amount:</b> ¥{amount:,.2f}
-🎯 <b>Client Type:</b> {client_type}
-💵 <b>Commission:</b> ¥{commission:,.2f} ({commission_rate*100}%)
+🎯 <b>Client Type:</b> {client_display}
+💵 <b>Commission:</b> ¥{commission:,.2f} ({commission_rate:.1f}%)
 
 <b>Please confirm the information:</b>
     """
     
-    await query.edit_message_text(
-        confirm_message,
-        parse_mode=ParseMode.HTML,
-        reply_markup=reply_markup
-    )
+    if update.callback_query:
+        await update.callback_query.edit_message_text(
+            confirm_message,
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+    else:
+        await update.message.reply_text(
+            confirm_message,
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+    
     return SALES_CONFIRM
 
 async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -239,12 +386,22 @@ async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     try:
         # 保存到 Google Sheets
         sheets_manager = SheetsManager()
+        
+        # 准备数据
+        client_type = context.user_data['sales_client']
+        agent_info = ""
+        if client_type == "Agent" and 'sales_agent' in context.user_data:
+            agent_info = context.user_data['sales_agent']
+            client_type = f"{client_type}: {agent_info}"
+        
         sales_data = {
             'date': datetime.now().strftime('%Y-%m-%d %H:%M'),
             'person': context.user_data['sales_person'],
             'amount': context.user_data['sales_amount'],
-            'client_type': context.user_data['sales_client'],
-            'commission': context.user_data['sales_commission']
+            'client_type': client_type,
+            'commission_rate': context.user_data.get('commission_rate', 0),
+            'commission_amount': context.user_data['sales_commission'],
+            'notes': f"Agent: {agent_info}" if agent_info else ""
         }
         
         sheets_manager.add_sales_record(sales_data)
@@ -745,6 +902,10 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
         return await sales_client_handler(update, context)
     elif query.data == "sales_save":
         return await sales_save_handler(update, context)
+    elif query.data.startswith("pic_"):
+        return await sales_person_handler(update, context)
+    elif query.data.startswith("agent_"):
+        return await sales_agent_select_handler(update, context)
     
     # 费用管理回调
     elif query.data == "back_cost":
@@ -884,9 +1045,13 @@ def get_conversation_handlers():
             CommandHandler("SaleInvoice", sale_invoice_command)
         ],
         states={
-            SALES_PERSON: [MessageHandler(filters.TEXT & ~filters.COMMAND, sales_person_handler)],
+            SALES_PERSON: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, sales_person_handler),
+                CallbackQueryHandler(sales_person_handler, pattern="^pic_")
+            ],
             SALES_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, sales_amount_handler)],
             SALES_CLIENT: [CallbackQueryHandler(sales_client_handler, pattern="^client_")],
+            SALES_AGENT_SELECT: [CallbackQueryHandler(sales_agent_select_handler, pattern="^agent_")],
             SALES_CONFIRM: [CallbackQueryHandler(sales_save_handler, pattern="^sales_save$")]
         },
         fallbacks=[
@@ -1172,12 +1337,49 @@ async def sale_invoice_command(update: Update, context: ContextTypes.DEFAULT_TYP
     # 清除用户数据
     context.user_data.clear()
     
-    keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_main")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await update.message.reply_text(
-        "👤 <b>Select Person in Charge:</b>",
-        parse_mode=ParseMode.HTML,
-        reply_markup=reply_markup
-    )
-    return SALES_PERSON
+    try:
+        # 获取负责人列表
+        sheets_manager = SheetsManager()
+        pics = sheets_manager.get_pics(active_only=True)
+        
+        if not pics:
+            # 如果没有负责人数据，显示提示信息
+            keyboard = [[InlineKeyboardButton("⚙️ 创建负责人", callback_data="setting_create_pic")],
+                        [InlineKeyboardButton("❌ 取消", callback_data="back_main")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await update.message.reply_text(
+                "⚠️ <b>未找到负责人数据</b>\n\n请先创建负责人后再使用此功能。",
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
+            )
+            return ConversationHandler.END
+        
+        # 创建负责人选择按钮
+        keyboard = []
+        for pic in pics:
+            # 使用姓名作为按钮文本
+            name = pic.get('姓名', '')
+            if name:
+                keyboard.append([InlineKeyboardButton(f"👤 {name}", callback_data=f"pic_{name}")])
+        
+        # 添加取消按钮
+        keyboard.append([InlineKeyboardButton("❌ 取消", callback_data="back_main")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            "👤 <b>请选择负责人:</b>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+        
+        # 返回的是新的状态，因为我们需要一个回调来处理选择
+        return SALES_PERSON
+        
+    except Exception as e:
+        logger.error(f"获取负责人列表失败: {e}")
+        await update.message.reply_text(
+            "❌ <b>获取负责人数据失败</b>\n\n请稍后再试。",
+            parse_mode=ParseMode.HTML
+        )
+        return ConversationHandler.END
