@@ -885,7 +885,7 @@ async def cost_amount_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         
         # 对于所有采购支出和账单支出，提示上传收据
         cost_type = context.user_data.get('cost_type', '')
-        if cost_type == "Purchasing" or cost_type.endswith("Bill"):
+        if cost_type == "Purchasing" or cost_type == "Billing" or "Bill" in cost_type:
             keyboard = [
                 [InlineKeyboardButton("📷 Upload Receipt", callback_data="upload_receipt")],
                 [InlineKeyboardButton("⏭️ Skip", callback_data="skip_receipt")],
@@ -1410,6 +1410,8 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
         return await cost_menu(update, context)
     elif query.data in ["cost_purchasing", "cost_billing", "cost_salary"]:
         return await cost_type_handler(update, context)
+    elif query.data.startswith("billing_"):
+        return await cost_type_handler(update, context)
     elif query.data == "cost_list":
         await cost_list_handler(update, context)
         return ConversationHandler.END
@@ -1578,7 +1580,7 @@ def get_conversation_handlers():
         ],
         states={
             COST_TYPE: [
-                CallbackQueryHandler(cost_type_handler, pattern="^cost_")
+                CallbackQueryHandler(cost_type_handler, pattern="^cost_|^billing_")
             ],
             COST_SUPPLIER: [
                 CallbackQueryHandler(cost_supplier_handler, pattern="^supplier_"),
