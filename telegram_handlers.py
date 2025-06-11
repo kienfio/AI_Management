@@ -87,14 +87,14 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
     else:
         # 如果既不是回调查询也不是消息，记录错误
-        logger.error("无法显示主菜单：update对象既没有callback_query也没有message属性")
+        logger.error("Unable to display main menu: update object has neither callback_query nor message attribute")
         return ConversationHandler.END
         
     return ConversationHandler.END
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """处理 /help 命令和帮助回调"""
-    keyboard = [[InlineKeyboardButton("🔙 返回主菜单", callback_data="back_main")]]
+    keyboard = [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="back_main")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     help_message = """
@@ -139,7 +139,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """处理 /cancel 命令，取消当前会话"""
-    await update.message.reply_text("✅ 操作已取消")
+    await update.message.reply_text("✅ Operation cancelled")
     context.user_data.clear()
     await start_command(update, context)
     return ConversationHandler.END
@@ -153,13 +153,11 @@ async def sales_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await close_other_conversations(update, context)
     
     keyboard = [
-        [InlineKeyboardButton("➕ 新增销售记录", callback_data="sales_add")],
-        [InlineKeyboardButton("📋 查看销售记录", callback_data="sales_list")],
-        [InlineKeyboardButton("🔙 返回主菜单", callback_data="back_main")]
+        [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="back_main")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    message = "📊 *销售记录管理*\n\n请选择操作："
+    message = ""
     
     await update.callback_query.edit_message_text(
         message, 
@@ -168,15 +166,9 @@ async def sales_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     )
 
 async def sales_add_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """开始添加销售记录 - 输入负责人"""
-    keyboard = [[InlineKeyboardButton("❌ 取消", callback_data="back_sales")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await update.callback_query.edit_message_text(
-        "👤 请输入负责人姓名：",
-        reply_markup=reply_markup
-    )
-    return SALES_PERSON
+    """开始添加销售记录 - 输入负责人 (已弃用)"""
+    # 重定向到 sale_invoice_command
+    return await sale_invoice_command(update, context)
 
 async def sales_person_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """处理负责人选择"""
@@ -192,7 +184,7 @@ async def sales_person_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             context.user_data['sales_person'] = person_data[4:]  # 去掉"pic_"前缀
         else:
             # 未知回调数据
-            await query.edit_message_text("❌ 未知操作，请重新开始")
+            await query.edit_message_text("❌ Unknown operation, please start again")
             return ConversationHandler.END
     
     keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_main")]]
@@ -245,11 +237,11 @@ async def sales_amount_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         return SALES_CLIENT
     except ValueError as e:
         logger.error(f"金额解析错误: {e}")
-        await update.message.reply_text("⚠️ 请输入有效的金额数字")
+        await update.message.reply_text("⚠️ Please enter a valid amount")
         return SALES_AMOUNT
     except Exception as e:
         logger.error(f"处理金额时发生未知错误: {e}")
-        await update.message.reply_text("❌ 处理出错，请重新输入金额")
+        await update.message.reply_text("❌ Error processing, please re-enter the amount")
         return SALES_AMOUNT
 
 async def sales_client_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1388,7 +1380,7 @@ def get_conversation_handlers():
     # 销售记录会话处理器
     sales_conversation = ConversationHandler(
         entry_points=[
-            CallbackQueryHandler(sales_add_start, pattern="^sales_add$"),
+            CallbackQueryHandler(sale_invoice_command, pattern="^sales_add$"),
             CommandHandler("SaleInvoice", sale_invoice_command),
             # 添加菜单入口点
             CallbackQueryHandler(lambda u, c: sale_invoice_command(u, c), pattern="^menu_sales$")
