@@ -1368,24 +1368,9 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     elif query.data == "menu_report":
         return await report_menu(update, context)
     elif query.data == "menu_setting":
-        # 模拟直接调用Setting命令
-        context.user_data.clear()
-        
-        keyboard = [
-            [InlineKeyboardButton("👨‍💼  Create Agent", callback_data="setting_create_agent")],
-            [InlineKeyboardButton("🏭  Create Supplier", callback_data="setting_create_supplier")],
-            [InlineKeyboardButton("👷  Create Worker", callback_data="setting_create_worker")],
-            [InlineKeyboardButton("👑  Create Person in Charge", callback_data="setting_create_pic")],
-            [InlineKeyboardButton("🔙  Back to Main Menu", callback_data="back_main")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            "⚙️ <b>SYSTEM SETTINGS</b>\n\n<b>Please select what to create:</b>",
-            parse_mode=ParseMode.HTML,
-            reply_markup=reply_markup
-        )
-        return SETTING_CATEGORY
+        # 这个回调现在由 setting_conversation 处理
+        logger.info("menu_setting 回调被触发，但由 setting_conversation 处理")
+        return ConversationHandler.END
     elif query.data == "menu_help":
         await help_command(update, context)
         return ConversationHandler.END
@@ -1521,8 +1506,8 @@ def get_conversation_handlers():
         entry_points=[
             CallbackQueryHandler(setting_category_handler, pattern="^setting_create_"),
             CommandHandler("Setting", setting_command),
-            # 添加菜单入口点
-            CallbackQueryHandler(lambda u, c: setting_command(u, c), pattern="^menu_setting$")
+            # 添加菜单入口点 - 使用专门的处理函数
+            CallbackQueryHandler(menu_setting_handler, pattern="^menu_setting$")
         ],
         states={
             SETTING_CATEGORY: [CallbackQueryHandler(setting_category_handler, pattern="^setting_create_")],
@@ -2214,3 +2199,28 @@ async def receipt_upload_prompt(update: Update, context: ContextTypes.DEFAULT_TY
     )
     
     return COST_RECEIPT
+
+# 添加一个新函数用于处理菜单回调
+async def menu_setting_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理从主菜单进入Setting的回调"""
+    query = update.callback_query
+    await query.answer()
+    
+    # 清除用户数据
+    context.user_data.clear()
+    
+    keyboard = [
+        [InlineKeyboardButton("👨‍💼  Create Agent", callback_data="setting_create_agent")],
+        [InlineKeyboardButton("🏭  Create Supplier", callback_data="setting_create_supplier")],
+        [InlineKeyboardButton("👷  Create Worker", callback_data="setting_create_worker")],
+        [InlineKeyboardButton("👑  Create Person in Charge", callback_data="setting_create_pic")],
+        [InlineKeyboardButton("🔙  Back to Main Menu", callback_data="back_main")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        "⚙️ <b>SYSTEM SETTINGS</b>\n\n<b>Please select what to create:</b>",
+        parse_mode=ParseMode.HTML,
+        reply_markup=reply_markup
+    )
+    return SETTING_CATEGORY
