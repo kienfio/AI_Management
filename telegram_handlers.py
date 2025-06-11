@@ -1048,7 +1048,17 @@ async def setting_name_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             }
             category_name = category_names.get(category, "项目")
             
-            await sheets_manager.add_setting_item(category_name, name)
+            # 创建一个简单的数据结构，类似于其他添加方法
+            setting_data = {
+                'name': name,
+                'status': '激活'
+            }
+            
+            # 使用已有的方法添加数据
+            if category == "worker":
+                sheets_manager.add_worker(setting_data)
+            else:  # pic
+                sheets_manager.add_pic(setting_data)
             
             keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="back_main")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1079,7 +1089,7 @@ async def setting_ic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             'status': '激活'
         }
         
-        await sheets_manager.add_agent(agent_data)
+        sheets_manager.add_agent(agent_data)
         
         keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="back_main")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1111,7 +1121,7 @@ async def setting_type_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             'status': '激活'
         }
         
-        await sheets_manager.add_supplier(supplier_data)
+        sheets_manager.add_supplier(supplier_data)
         
         keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="back_main")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
