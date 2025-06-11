@@ -40,7 +40,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         [InlineKeyboardButton("📊 销售记录", callback_data="menu_sales")],
         [InlineKeyboardButton("💰 费用管理", callback_data="menu_cost")],
         [InlineKeyboardButton("📈 报表生成", callback_data="menu_report")],
-        [InlineKeyboardButton("⚙️ 系统设置", callback_data="menu_setting")],
+        [InlineKeyboardButton("⚙️ System Settings", callback_data="menu_setting")],
         [InlineKeyboardButton("❓ 帮助说明", callback_data="menu_help")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -53,7 +53,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 📊 *销售记录* - 登记发票和佣金
 💰 *费用管理* - 记录各项支出
 📈 *报表生成* - 查看统计报告
-⚙️ *系统设置* - 创建代理商/供应商
+⚙️ *System Settings* - 创建代理商/供应商
     """
     
     if update.callback_query:
@@ -974,16 +974,16 @@ async def setting_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     context.user_data.clear()
     
     keyboard = [
-        [InlineKeyboardButton("Create Agent", callback_data="setting_create_agent")],
-        [InlineKeyboardButton("Create Supplier", callback_data="setting_create_supplier")],
-        [InlineKeyboardButton("Create Worker", callback_data="setting_create_worker")],
-        [InlineKeyboardButton("Create Person in Charge", callback_data="setting_create_pic")],
-        [InlineKeyboardButton("🔙 返回主菜单", callback_data="back_main")]
+        [InlineKeyboardButton("👨‍💼 Create Agent", callback_data="setting_create_agent")],
+        [InlineKeyboardButton("🏭 Create Supplier", callback_data="setting_create_supplier")],
+        [InlineKeyboardButton("👷 Create Worker", callback_data="setting_create_worker")],
+        [InlineKeyboardButton("👑 Create Person in Charge", callback_data="setting_create_pic")],
+        [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="back_main")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
-        "⚙️ *系统设置*\n\n请选择要创建的类型：",
+        "⚙️ *System Settings*\n\n*Please select what to create:*",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=reply_markup
     )
@@ -998,19 +998,27 @@ async def setting_category_handler(update: Update, context: ContextTypes.DEFAULT
     context.user_data['setting_category'] = category_data
     
     category_names = {
-        "agent": "代理商",
-        "supplier": "供应商",
-        "worker": "工作人员",
-        "pic": "负责人"
+        "agent": "Agent",
+        "supplier": "Supplier",
+        "worker": "Worker",
+        "pic": "Person in Charge"
     }
     
-    category_name = category_names.get(category_data, "项目")
+    category_emojis = {
+        "agent": "👨‍💼",
+        "supplier": "🏭",
+        "worker": "👷",
+        "pic": "👑"
+    }
     
-    keyboard = [[InlineKeyboardButton("❌ 取消", callback_data="back_main")]]
+    category_name = category_names.get(category_data, "Item")
+    category_emoji = category_emojis.get(category_data, "➕")
+    
+    keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_main")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
-        f"➕ *创建{category_name}*\n\n请输入名称：",
+        f"{category_emoji} *Create {category_name}*\n\n*Please enter a name:*",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=reply_markup
     )
@@ -1023,18 +1031,28 @@ async def setting_name_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     
     category = context.user_data.get('setting_category')
     
-    keyboard = [[InlineKeyboardButton("❌ 取消", callback_data="back_main")]]
+    keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_main")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    category_emojis = {
+        "agent": "👨‍💼",
+        "supplier": "🏭",
+        "worker": "👷",
+        "pic": "👑"
+    }
+    emoji = category_emojis.get(category, "➕")
     
     if category == "agent":
         await update.message.reply_text(
-            f"👤 名称：{name}\n\n请输入IC号码：",
+            f"{emoji} *Name:* {name}\n\n*Please enter IC number:*",
+            parse_mode=ParseMode.MARKDOWN,
             reply_markup=reply_markup
         )
         return SETTING_IC
     elif category == "supplier":
         await update.message.reply_text(
-            f"🏭 名称：{name}\n\n请输入供应商类别：",
+            f"{emoji} *Name:* {name}\n\n*Please enter supplier category:*",
+            parse_mode=ParseMode.MARKDOWN,
             reply_markup=reply_markup
         )
         return SETTING_TYPE
@@ -1043,10 +1061,10 @@ async def setting_name_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         try:
             sheets_manager = SheetsManager()
             category_names = {
-                "worker": "工作人员",
-                "pic": "负责人"
+                "worker": "Worker",
+                "pic": "Person in Charge"
             }
-            category_name = category_names.get(category, "项目")
+            category_name = category_names.get(category, "Item")
             
             # 创建一个简单的数据结构，类似于其他添加方法
             setting_data = {
@@ -1060,11 +1078,12 @@ async def setting_name_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             else:  # pic
                 sheets_manager.add_pic(setting_data)
             
-            keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="back_main")]]
+            keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="back_main")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await update.message.reply_text(
-                f"✅ {category_name} \"{name}\" 已成功添加！",
+                f"✅ {category_name} \"{name}\" has been successfully added!",
+                parse_mode=ParseMode.MARKDOWN,
                 reply_markup=reply_markup
             )
             
@@ -1091,17 +1110,18 @@ async def setting_ic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
         sheets_manager.add_agent(agent_data)
         
-        keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="back_main")]]
+        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="back_main")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await update.message.reply_text(
-            f"✅ 代理商 \"{name}\" (IC: {ic}) 已成功添加！",
+            f"✅ Agent \"{name}\" (IC: {ic}) has been successfully added!",
+            parse_mode=ParseMode.MARKDOWN,
             reply_markup=reply_markup
         )
         
     except Exception as e:
         logger.error(f"添加代理商失败: {e}")
-        await update.message.reply_text("❌ 添加失败，请重试")
+        await update.message.reply_text("❌ Failed to add. Please try again.")
     
     context.user_data.clear()
     return ConversationHandler.END
@@ -1123,17 +1143,18 @@ async def setting_type_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         
         sheets_manager.add_supplier(supplier_data)
         
-        keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="back_main")]]
+        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="back_main")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await update.message.reply_text(
-            f"✅ 供应商 \"{name}\" (类别: {supplier_type}) 已成功添加！",
+            f"✅ Supplier \"{name}\" (Category: {supplier_type}) has been successfully added!",
+            parse_mode=ParseMode.MARKDOWN,
             reply_markup=reply_markup
         )
         
     except Exception as e:
         logger.error(f"添加供应商失败: {e}")
-        await update.message.reply_text("❌ 添加失败，请重试")
+        await update.message.reply_text("❌ Failed to add. Please try again.")
     
     context.user_data.clear()
     return ConversationHandler.END
