@@ -24,6 +24,9 @@ REPORT_TYPE, REPORT_MONTH = range(10, 12)
 # 系统设置状态
 SETTINGS_TYPE, SETTINGS_ADD, SETTINGS_EDIT, SETTINGS_DELETE = range(12, 16)
 
+# 新增Setting命令状态
+SETTING_CATEGORY, SETTING_NAME, SETTING_IC, SETTING_TYPE = range(16, 20)
+
 # ====================================
 # 基础命令区 - /start, /help, /cancel
 # ====================================
@@ -37,7 +40,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         [InlineKeyboardButton("📊 销售记录", callback_data="menu_sales")],
         [InlineKeyboardButton("💰 费用管理", callback_data="menu_cost")],
         [InlineKeyboardButton("📈 报表生成", callback_data="menu_report")],
-        [InlineKeyboardButton("⚙️ 系统设置", callback_data="menu_settings")],
         [InlineKeyboardButton("❓ 帮助说明", callback_data="menu_help")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -50,7 +52,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 📊 *销售记录* - 登记发票和佣金
 💰 *费用管理* - 记录各项支出
 📈 *报表生成* - 查看统计报告
-⚙️ *系统设置* - 管理基础信息
     """
     
     if update.callback_query:
@@ -91,15 +92,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 • 指定月份查询
 • 收支汇总统计
 
-⚙️ *系统设置功能*
-• 代理商管理
-• 供应商维护
-• 产品分类设置
-
 💡 *操作提示*
 • 使用按钮进行所有操作
 • 可随时返回主菜单
 • 新操作会自动关闭旧会话
+• 使用 /Setting 命令创建代理商、供应商等
     """
     
     if update.callback_query:
@@ -683,180 +680,6 @@ async def report_yearly_handler(update: Update, context: ContextTypes.DEFAULT_TY
     except Exception as e:
         logger.error(f"生成年度报表失败: {e}")
         await query.edit_message_text("❌ 生成报表失败，请重试")
-# ====================================
-# 系统设置区 - 代理商、供应商、产品管理
-# ====================================
-
-async def settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """系统设置主菜单"""
-    await close_other_conversations(update, context)
-    
-    keyboard = [
-        [InlineKeyboardButton("🤝 代理商管理", callback_data="settings_agents")],
-        [InlineKeyboardButton("🏭 供应商管理", callback_data="settings_suppliers")],
-        [InlineKeyboardButton("📦 产品分类", callback_data="settings_products")],
-        [InlineKeyboardButton("⚙️ 系统配置", callback_data="settings_config")],
-        [InlineKeyboardButton("🔙 返回主菜单", callback_data="back_main")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    message = "⚙️ *系统设置*\n\n请选择管理项目："
-    
-    await update.callback_query.edit_message_text(
-        message, 
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=reply_markup
-    )
-
-async def settings_agents_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """代理商管理"""
-    query = update.callback_query
-    await query.answer()
-    
-    keyboard = [
-        [InlineKeyboardButton("➕ 添加代理商", callback_data="agent_add")],
-        [InlineKeyboardButton("📋 查看代理商", callback_data="agent_list")],
-        [InlineKeyboardButton("✏️ 编辑代理商", callback_data="agent_edit")],
-        [InlineKeyboardButton("🗑️ 删除代理商", callback_data="agent_delete")],
-        [InlineKeyboardButton("🔙 返回设置", callback_data="menu_settings")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(
-        "🤝 *代理商管理*\n\n请选择操作：",
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=reply_markup
-    )
-
-async def settings_suppliers_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """供应商管理"""
-    query = update.callback_query
-    await query.answer()
-    
-    keyboard = [
-        [InlineKeyboardButton("➕ 添加供应商", callback_data="supplier_add")],
-        [InlineKeyboardButton("📋 查看供应商", callback_data="supplier_list")],
-        [InlineKeyboardButton("✏️ 编辑供应商", callback_data="supplier_edit")],
-        [InlineKeyboardButton("🗑️ 删除供应商", callback_data="supplier_delete")],
-        [InlineKeyboardButton("🔙 返回设置", callback_data="menu_settings")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(
-        "🏭 *供应商管理*\n\n请选择操作：",
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=reply_markup
-    )
-
-async def settings_products_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """产品分类管理"""
-    query = update.callback_query
-    await query.answer()
-    
-    keyboard = [
-        [InlineKeyboardButton("➕ 添加分类", callback_data="product_add")],
-        [InlineKeyboardButton("📋 查看分类", callback_data="product_list")],
-        [InlineKeyboardButton("✏️ 编辑分类", callback_data="product_edit")],
-        [InlineKeyboardButton("🗑️ 删除分类", callback_data="product_delete")],
-        [InlineKeyboardButton("🔙 返回设置", callback_data="menu_settings")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(
-        "📦 *产品分类管理*\n\n请选择操作：",
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=reply_markup
-    )
-
-async def settings_add_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """添加设置项目（代理商/供应商/产品）"""
-    query = update.callback_query
-    await query.answer()
-    
-    setting_types = {
-        "agent_add": "代理商",
-        "supplier_add": "供应商", 
-        "product_add": "产品分类"
-    }
-    
-    setting_type = setting_types.get(query.data, "项目")
-    context.user_data['setting_type'] = setting_type
-    context.user_data['setting_action'] = 'add'
-    
-    keyboard = [[InlineKeyboardButton("❌ 取消", callback_data="menu_settings")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(
-        f"➕ *添加{setting_type}*\n\n请输入{setting_type}名称：",
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=reply_markup
-    )
-    return SETTINGS_ADD
-
-async def settings_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理设置项目输入"""
-    setting_name = update.message.text.strip()
-    setting_type = context.user_data['setting_type']
-    action = context.user_data['setting_action']
-    
-    try:
-        sheets_manager = SheetsManager()
-        
-        if action == 'add':
-            await sheets_manager.add_setting_item(setting_type, setting_name)
-            message = f"✅ {setting_type} \"{setting_name}\" 已成功添加！"
-        
-        keyboard = [[InlineKeyboardButton("🔙 返回设置", callback_data="menu_settings")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await update.message.reply_text(
-            message,
-            reply_markup=reply_markup
-        )
-        
-    except Exception as e:
-        logger.error(f"设置操作失败: {e}")
-        await update.message.reply_text("❌ 操作失败，请重试")
-    
-    context.user_data.clear()
-    return ConversationHandler.END
-
-async def settings_list_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """查看设置项目列表"""
-    query = update.callback_query
-    await query.answer()
-    
-    list_types = {
-        "agent_list": "代理商",
-        "supplier_list": "供应商",
-        "product_list": "产品分类"
-    }
-    
-    setting_type = list_types.get(query.data, "项目")
-    
-    try:
-        sheets_manager = SheetsManager()
-        items = await sheets_manager.get_setting_items(setting_type)
-        
-        if not items:
-            message = f"📋 暂无{setting_type}记录"
-        else:
-            message = f"📋 *{setting_type}列表*\n\n"
-            for i, item in enumerate(items, 1):
-                message += f"{i}. {item['name']}\n"
-        
-        keyboard = [[InlineKeyboardButton("🔙 返回设置", callback_data="menu_settings")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            message,
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=reply_markup
-        )
-        
-    except Exception as e:
-        logger.error(f"获取设置列表失败: {e}")
-        await query.edit_message_text("❌ 获取列表失败，请重试")
 
 # ====================================
 # 回调处理区 - 所有 inline keyboard 回调
@@ -879,8 +702,6 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
         return await cost_menu(update, context)
     elif query.data == "menu_report":
         return await report_menu(update, context)
-    elif query.data == "menu_settings":
-        return await settings_menu(update, context)
     elif query.data == "menu_help":
         await help_command(update, context)
         return ConversationHandler.END
@@ -920,21 +741,6 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
         return await report_custom_handler(update, context)
     elif query.data == "report_yearly":
         await report_yearly_handler(update, context)
-        return ConversationHandler.END
-    
-    # 系统设置回调
-    elif query.data == "back_settings":
-        return await settings_menu(update, context)
-    elif query.data == "settings_agents":
-        return await settings_agents_handler(update, context)
-    elif query.data == "settings_suppliers":
-        return await settings_suppliers_handler(update, context)
-    elif query.data == "settings_products":
-        return await settings_products_handler(update, context)
-    elif query.data in ["agent_add", "supplier_add", "product_add"]:
-        return await settings_add_handler(update, context)
-    elif query.data in ["agent_list", "supplier_list", "product_list"]:
-        await settings_list_handler(update, context)
         return ConversationHandler.END
     
     # 默认返回主菜单
@@ -1013,6 +819,7 @@ sales_conversation = None
 expenses_conversation = None
 report_conversation = None
 settings_conversation = None
+setting_conversation = None
 sales_callback_handler = callback_query_handler
 expenses_callback_handler = callback_query_handler
 report_callback_handler = callback_query_handler
@@ -1024,6 +831,26 @@ def get_conversation_handlers():
     """获取所有会话处理器配置"""
     
     global sales_conversation, expenses_conversation, report_conversation, settings_conversation
+    
+    # Setting命令会话处理器
+    setting_conversation = ConversationHandler(
+        entry_points=[
+            CommandHandler("Setting", setting_command),
+            CallbackQueryHandler(setting_category_handler, pattern="^setting_create_")
+        ],
+        states={
+            SETTING_CATEGORY: [CallbackQueryHandler(setting_category_handler, pattern="^setting_create_")],
+            SETTING_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, setting_name_handler)],
+            SETTING_IC: [MessageHandler(filters.TEXT & ~filters.COMMAND, setting_ic_handler)],
+            SETTING_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, setting_type_handler)]
+        },
+        fallbacks=[
+            CallbackQueryHandler(callback_query_handler),
+            CommandHandler("cancel", cancel_command)
+        ],
+        name="setting_conversation",
+        persistent=False
+    )
     
     # 销售记录会话处理器
     sales_conversation = ConversationHandler(
@@ -1100,7 +927,7 @@ def get_conversation_handlers():
         persistent=False
     )
     
-    return [sales_conversation, expenses_conversation, report_conversation, settings_conversation]
+    return [sales_conversation, expenses_conversation, report_conversation, settings_conversation, setting_conversation]
 
 # ====================================
 # 主处理器注册函数
@@ -1113,7 +940,7 @@ def register_handlers(application):
     get_conversation_handlers()
     
     # 添加会话处理器
-    for conversation in [sales_conversation, expenses_conversation, report_conversation, settings_conversation]:
+    for conversation in [sales_conversation, expenses_conversation, report_conversation, setting_conversation]:
         if conversation:
             application.add_handler(conversation)
     
@@ -1121,12 +948,12 @@ def register_handlers(application):
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("cancel", cancel_command))
+    application.add_handler(CommandHandler("Setting", setting_command))
     
     # 回调查询处理器 (放在会话处理器之后)
     application.add_handler(CallbackQueryHandler(sales_callback_handler, pattern='^sales_'))
     application.add_handler(CallbackQueryHandler(expenses_callback_handler, pattern='^(cost_|expenses_)'))
     application.add_handler(CallbackQueryHandler(report_callback_handler, pattern='^report_'))
-    application.add_handler(CallbackQueryHandler(settings_callback_handler, pattern='^settings_'))
     application.add_handler(CallbackQueryHandler(close_session_handler, pattern='^close_session$'))
     application.add_handler(CallbackQueryHandler(general_callback_handler))
     
@@ -1140,3 +967,163 @@ def register_handlers(application):
     application.add_error_handler(error_handler)
     
     logger.info("所有处理器已成功注册")
+
+async def setting_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理 /Setting 命令 - 系统设置直接命令"""
+    # 清除用户数据
+    context.user_data.clear()
+    
+    keyboard = [
+        [InlineKeyboardButton("Create Agent", callback_data="setting_create_agent")],
+        [InlineKeyboardButton("Create Supplier", callback_data="setting_create_supplier")],
+        [InlineKeyboardButton("Create Worker", callback_data="setting_create_worker")],
+        [InlineKeyboardButton("Create Person in Charge", callback_data="setting_create_pic")],
+        [InlineKeyboardButton("🔙 返回主菜单", callback_data="back_main")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        "⚙️ *系统设置*\n\n请选择要创建的类型：",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=reply_markup
+    )
+    return SETTING_CATEGORY
+
+async def setting_category_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理设置类别选择"""
+    query = update.callback_query
+    await query.answer()
+    
+    category_data = query.data.replace("setting_create_", "")
+    context.user_data['setting_category'] = category_data
+    
+    category_names = {
+        "agent": "代理商",
+        "supplier": "供应商",
+        "worker": "工作人员",
+        "pic": "负责人"
+    }
+    
+    category_name = category_names.get(category_data, "项目")
+    
+    keyboard = [[InlineKeyboardButton("❌ 取消", callback_data="back_main")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        f"➕ *创建{category_name}*\n\n请输入名称：",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=reply_markup
+    )
+    return SETTING_NAME
+
+async def setting_name_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理名称输入"""
+    name = update.message.text.strip()
+    context.user_data['setting_name'] = name
+    
+    category = context.user_data.get('setting_category')
+    
+    keyboard = [[InlineKeyboardButton("❌ 取消", callback_data="back_main")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    if category == "agent":
+        await update.message.reply_text(
+            f"👤 名称：{name}\n\n请输入IC号码：",
+            reply_markup=reply_markup
+        )
+        return SETTING_IC
+    elif category == "supplier":
+        await update.message.reply_text(
+            f"🏭 名称：{name}\n\n请输入供应商类别：",
+            reply_markup=reply_markup
+        )
+        return SETTING_TYPE
+    else:
+        # 对于工作人员和负责人，直接保存
+        try:
+            sheets_manager = SheetsManager()
+            category_names = {
+                "worker": "工作人员",
+                "pic": "负责人"
+            }
+            category_name = category_names.get(category, "项目")
+            
+            await sheets_manager.add_setting_item(category_name, name)
+            
+            keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="back_main")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await update.message.reply_text(
+                f"✅ {category_name} \"{name}\" 已成功添加！",
+                reply_markup=reply_markup
+            )
+            
+        except Exception as e:
+            logger.error(f"添加{category}失败: {e}")
+            await update.message.reply_text("❌ 添加失败，请重试")
+        
+        return ConversationHandler.END
+
+async def setting_ic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理IC号码输入"""
+    ic = update.message.text.strip()
+    name = context.user_data.get('setting_name')
+    
+    try:
+        sheets_manager = SheetsManager()
+        
+        # 添加代理商，包含IC号码
+        agent_data = {
+            'name': name,
+            'ic': ic,
+            'status': '激活'
+        }
+        
+        await sheets_manager.add_agent(agent_data)
+        
+        keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="back_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            f"✅ 代理商 \"{name}\" (IC: {ic}) 已成功添加！",
+            reply_markup=reply_markup
+        )
+        
+    except Exception as e:
+        logger.error(f"添加代理商失败: {e}")
+        await update.message.reply_text("❌ 添加失败，请重试")
+    
+    context.user_data.clear()
+    return ConversationHandler.END
+
+async def setting_type_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理供应商类别输入"""
+    supplier_type = update.message.text.strip()
+    name = context.user_data.get('setting_name')
+    
+    try:
+        sheets_manager = SheetsManager()
+        
+        # 添加供应商，包含类别
+        supplier_data = {
+            'name': name,
+            'type': supplier_type,
+            'status': '激活'
+        }
+        
+        await sheets_manager.add_supplier(supplier_data)
+        
+        keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="back_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            f"✅ 供应商 \"{name}\" (类别: {supplier_type}) 已成功添加！",
+            reply_markup=reply_markup
+        )
+        
+    except Exception as e:
+        logger.error(f"添加供应商失败: {e}")
+        await update.message.reply_text("❌ 添加失败，请重试")
+    
+    context.user_data.clear()
+    return ConversationHandler.END
