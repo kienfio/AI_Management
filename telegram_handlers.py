@@ -818,19 +818,17 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 sales_conversation = None
 expenses_conversation = None
 report_conversation = None
-settings_conversation = None
 setting_conversation = None
 sales_callback_handler = callback_query_handler
 expenses_callback_handler = callback_query_handler
 report_callback_handler = callback_query_handler
-settings_callback_handler = callback_query_handler
 close_session_handler = callback_query_handler
 general_callback_handler = callback_query_handler
 
 def get_conversation_handlers():
     """获取所有会话处理器配置"""
     
-    global sales_conversation, expenses_conversation, report_conversation, settings_conversation
+    global sales_conversation, expenses_conversation, report_conversation, setting_conversation
     
     # Setting命令会话处理器
     setting_conversation = ConversationHandler(
@@ -908,26 +906,7 @@ def get_conversation_handlers():
         persistent=False
     )
     
-    # 系统设置会话处理器
-    settings_conversation = ConversationHandler(
-        entry_points=[
-            CallbackQueryHandler(settings_add_handler, pattern="^(agent|supplier|product)_add$")
-        ],
-        states={
-            SETTINGS_TYPE: [CallbackQueryHandler(callback_query_handler, pattern="^settings_")],
-            SETTINGS_ADD: [MessageHandler(filters.TEXT & ~filters.COMMAND, settings_input_handler)],
-            SETTINGS_EDIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, settings_input_handler)],
-            SETTINGS_DELETE: [MessageHandler(filters.TEXT & ~filters.COMMAND, settings_input_handler)]
-        },
-        fallbacks=[
-            CallbackQueryHandler(callback_query_handler),
-            CommandHandler("cancel", cancel_command)
-        ],
-        name="settings_conversation",
-        persistent=False
-    )
-    
-    return [sales_conversation, expenses_conversation, report_conversation, settings_conversation, setting_conversation]
+    return [sales_conversation, expenses_conversation, report_conversation, setting_conversation]
 
 # ====================================
 # 主处理器注册函数
