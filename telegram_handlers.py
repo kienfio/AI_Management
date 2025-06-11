@@ -37,7 +37,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await close_other_conversations(update, context)
     
     keyboard = [
-        [InlineKeyboardButton("📊 销售记录", callback_data="menu_sales")],
+        [InlineKeyboardButton("📊 Sale Invoice", callback_data="menu_sales")],
         [InlineKeyboardButton("💰 费用管理", callback_data="menu_cost")],
         [InlineKeyboardButton("📈 报表生成", callback_data="menu_report")],
         [InlineKeyboardButton("⚙️ System Settings", callback_data="menu_setting")],
@@ -50,7 +50,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 👋 欢迎使用！请选择需要的功能：
 
-📊 *销售记录* - 登记发票和佣金
+📊 *Sale Invoice* - 登记发票和佣金
 💰 *费用管理* - 记录各项支出
 📈 *报表生成* - 查看统计报告
 ⚙️ *System Settings* - 创建代理商/供应商
@@ -159,11 +159,12 @@ async def sales_person_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     """处理负责人输入"""
     context.user_data['sales_person'] = update.message.text.strip()
     
-    keyboard = [[InlineKeyboardButton("❌ 取消", callback_data="back_sales")]]
+    keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_main")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
-        f"👤 负责人：{context.user_data['sales_person']}\n\n💰 请输入发票金额：",
+        f"👤 <b>Person in Charge:</b> {context.user_data['sales_person']}\n\n💰 <b>Enter Amount:</b>",
+        parse_mode=ParseMode.HTML,
         reply_markup=reply_markup
     )
     return SALES_AMOUNT
@@ -175,19 +176,20 @@ async def sales_amount_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data['sales_amount'] = amount
         
         keyboard = [
-            [InlineKeyboardButton("🏢 公司客户", callback_data="client_company")],
-            [InlineKeyboardButton("🤝 代理客户", callback_data="client_agent")],
-            [InlineKeyboardButton("❌ 取消", callback_data="back_sales")]
+            [InlineKeyboardButton("🏢 Company", callback_data="client_company")],
+            [InlineKeyboardButton("🤝 Agent", callback_data="client_agent")],
+            [InlineKeyboardButton("❌ Cancel", callback_data="back_main")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await update.message.reply_text(
-            f"💰 发票金额：¥{amount:,.2f}\n\n🎯 请选择客户类型：",
+            f"💰 <b>Amount:</b> ¥{amount:,.2f}\n\n🎯 <b>Select Client Type:</b>",
+            parse_mode=ParseMode.HTML,
             reply_markup=reply_markup
         )
         return SALES_CLIENT
     except ValueError:
-        await update.message.reply_text("⚠️ 请输入有效的数字金额")
+        await update.message.reply_text("⚠️ Please enter a valid amount")
         return SALES_AMOUNT
 
 async def sales_client_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -195,36 +197,36 @@ async def sales_client_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     
-    client_type = "公司" if query.data == "client_company" else "代理"
+    client_type = "Company" if query.data == "client_company" else "Agent"
     context.user_data['sales_client'] = client_type
     
     # 计算佣金 (示例: 公司5%, 代理8%)
     amount = context.user_data['sales_amount']
-    commission_rate = 0.05 if client_type == "公司" else 0.08
+    commission_rate = 0.05 if client_type == "Company" else 0.08
     commission = amount * commission_rate
     context.user_data['sales_commission'] = commission
     
     keyboard = [
-        [InlineKeyboardButton("✅ 确认保存", callback_data="sales_save")],
-        [InlineKeyboardButton("✏️ 重新填写", callback_data="sales_add")],
-        [InlineKeyboardButton("❌ 取消", callback_data="back_sales")]
+        [InlineKeyboardButton("✅ Save", callback_data="sales_save")],
+        [InlineKeyboardButton("✏️ Edit", callback_data="sales_add")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="back_main")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     confirm_message = f"""
-📊 *销售记录确认*
+📊 <b>INVOICE CONFIRMATION</b>
 
-👤 负责人：{context.user_data['sales_person']}
-💰 发票金额：¥{amount:,.2f}
-🎯 客户类型：{client_type}
-💵 佣金金额：¥{commission:,.2f} ({commission_rate*100}%)
+👤 <b>Person in Charge:</b> {context.user_data['sales_person']}
+💰 <b>Amount:</b> ¥{amount:,.2f}
+🎯 <b>Client Type:</b> {client_type}
+💵 <b>Commission:</b> ¥{commission:,.2f} ({commission_rate*100}%)
 
-请确认信息是否正确：
+<b>Please confirm the information:</b>
     """
     
     await query.edit_message_text(
         confirm_message,
-        parse_mode=ParseMode.MARKDOWN,
+        parse_mode=ParseMode.HTML,
         reply_markup=reply_markup
     )
     return SALES_CONFIRM
@@ -245,19 +247,23 @@ async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             'commission': context.user_data['sales_commission']
         }
         
-        await sheets_manager.add_sales_record(sales_data)
+        sheets_manager.add_sales_record(sales_data)
         
-        keyboard = [[InlineKeyboardButton("🔙 返回销售菜单", callback_data="menu_sales")]]
+        keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="back_main")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
-            "✅ 销售记录已成功保存！",
+            "✅ <b>Invoice saved successfully!</b>",
+            parse_mode=ParseMode.HTML,
             reply_markup=reply_markup
         )
         
     except Exception as e:
         logger.error(f"保存销售记录失败: {e}")
-        await query.edit_message_text("❌ 保存失败，请重试")
+        await query.edit_message_text(
+            "❌ <b>Failed to save. Please try again.</b>",
+            parse_mode=ParseMode.HTML
+        )
     
     # 清除临时数据
     context.user_data.clear()
@@ -874,7 +880,8 @@ def get_conversation_handlers():
     # 销售记录会话处理器
     sales_conversation = ConversationHandler(
         entry_points=[
-            CallbackQueryHandler(sales_add_start, pattern="^sales_add$")
+            CallbackQueryHandler(sales_add_start, pattern="^sales_add$"),
+            CommandHandler("SaleInvoice", sale_invoice_command)
         ],
         states={
             SALES_PERSON: [MessageHandler(filters.TEXT & ~filters.COMMAND, sales_person_handler)],
@@ -949,6 +956,7 @@ def register_handlers(application):
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("cancel", cancel_command))
     application.add_handler(CommandHandler("Setting", setting_command))
+    application.add_handler(CommandHandler("SaleInvoice", sale_invoice_command))
     
     # 回调查询处理器 (放在会话处理器之后)
     application.add_handler(CallbackQueryHandler(sales_callback_handler, pattern='^sales_'))
@@ -1158,3 +1166,18 @@ async def setting_type_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     
     context.user_data.clear()
     return ConversationHandler.END
+
+async def sale_invoice_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理 /SaleInvoice 命令 - 直接开始添加销售记录"""
+    # 清除用户数据
+    context.user_data.clear()
+    
+    keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_main")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        "👤 <b>Select Person in Charge:</b>",
+        parse_mode=ParseMode.HTML,
+        reply_markup=reply_markup
+    )
+    return SALES_PERSON
