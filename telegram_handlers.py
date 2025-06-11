@@ -826,7 +826,15 @@ async def cost_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         date_str = datetime.now().strftime('%Y-%m-%d')
         
         sheets_manager = SheetsManager()
-        sheets_manager.add_expense(date_str, cost_type, amount, supplier, desc, receipt)
+        data = {
+            'date': date_str,
+            'type': cost_type,
+            'supplier': supplier,
+            'amount': amount,
+            'category': supplier if supplier else 'Other',
+            'description': desc
+        }
+        sheets_manager.add_expense_record(data)
         
         # 显示成功消息
         await query.edit_message_text(
@@ -855,33 +863,58 @@ async def cost_list_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     
     try:
         sheets_manager = SheetsManager()
-        cost_records = await sheets_manager.get_recent_costs(limit=10)
+        # 获取最近的费用记录
+        expense_records = sheets_manager.get_expense_records(month=None)
         
-        if not cost_records:
-            message = "📋 暂无费用记录"
+        if not expense_records:
+            message = "📋 <b>No expense records found</b>"
         else:
-            message = "📋 *最近费用记录*\n\n"
-            for record in cost_records:
-                message += f"📅 {record['date']}\n"
-                message += f"📋 {record['type']} | 💰 ¥{record['amount']:,.2f}\n"
+            # 表头映射
+            header_mapping = {
+                '日期': 'date',
+                '费用类型': 'type',
+                '供应商': 'supplier',
+                '金额': 'amount',
+                '类别': 'category',
+                '备注': 'description'
+            }
+            
+            # 转换记录中的键名
+            converted_records = []
+            for record in expense_records:
+                converted_record = {}
+                for zh_key, en_key in header_mapping.items():
+                    if zh_key in record:
+                        converted_record[en_key] = record[zh_key]
+                converted_records.append(converted_record)
+            
+            # 只显示最近10条记录
+            recent_records = converted_records[:10]
+            message = "📋 <b>RECENT EXPENSE RECORDS</b>\n\n"
+            for record in recent_records:
+                message += f"📅 <b>Date:</b> {record.get('date', 'N/A')}\n"
+                message += f"📋 <b>Type:</b> {record.get('type', 'N/A')} | 💰 <b>Amount:</b> RM{float(record.get('amount', 0)):,.2f}\n"
                 if record.get('supplier'):
-                    message += f"🏭 {record['supplier']}\n"
+                    message += f"🏭 <b>Supplier:</b> {record.get('supplier')}\n"
                 if record.get('description'):
-                    message += f"📝 {record['description']}\n"
+                    message += f"📝 <b>Description:</b> {record.get('description')}\n"
                 message += "\n"
         
-        keyboard = [[InlineKeyboardButton("🔙 返回费用菜单", callback_data="menu_cost")]]
+        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="menu_cost")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
             message,
-            parse_mode=ParseMode.MARKDOWN,
+            parse_mode=ParseMode.HTML,
             reply_markup=reply_markup
         )
         
     except Exception as e:
         logger.error(f"获取费用记录失败: {e}")
-        await query.edit_message_text("❌ 获取记录失败，请重试")
+        await query.edit_message_text(
+            "❌ <b>Failed to get expense records</b>\n\nPlease try again later.",
+            parse_mode=ParseMode.HTML
+        )
 
 # ====================================
 # 报表生成区 - 月度报表、自定义查询
@@ -1123,13 +1156,11 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
         return await cost_menu(update, context)
     elif query.data in ["cost_purchasing", "cost_other"]:
         return await cost_type_handler(update, context)
-    elif query.data in ["supplier_a", "supplier_b", "supplier_other"]:
-        return await cost_supplier_handler(update, context)
-    elif query.data == "cost_save":
-        return await cost_save_handler(update, context)
     elif query.data == "cost_list":
         await cost_list_handler(update, context)
         return ConversationHandler.END
+    elif query.data.startswith("supplier_"):
+        return await cost_supplier_handler(update, context)
     
     # 报表生成回调
     elif query.data == "back_report":
