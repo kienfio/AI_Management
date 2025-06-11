@@ -709,10 +709,13 @@ async def cost_type_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             # 创建供应商选择按钮
             keyboard = []
             for supplier in suppliers:
-                # 使用名称作为按钮文本
-                name = supplier.get('名称', '')
+                # 使用供应商名称作为按钮文本
+                name = supplier.get('供应商名称', '')
                 if name:
                     keyboard.append([InlineKeyboardButton(f"🏭 {name}", callback_data=f"supplier_{name}")])
+            
+            # 添加自定义输入选项
+            keyboard.append([InlineKeyboardButton("✏️ Other (Custom Input)", callback_data="supplier_other")])
             
             # 添加取消按钮
             keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="back_cost")])
@@ -770,6 +773,23 @@ async def cost_supplier_handler(update: Update, context: ContextTypes.DEFAULT_TY
     
     # 从回调数据中提取供应商名称
     supplier_name = query.data.replace("supplier_", "")
+    
+    # 处理自定义供应商输入
+    if supplier_name == "other":
+        keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "🏭 <b>Please enter the supplier name:</b>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+        
+        # 设置一个标记，表示我们正在等待自定义供应商名称输入
+        context.user_data['waiting_for_custom_supplier'] = True
+        return COST_SUPPLIER
+    
+    # 正常供应商选择
     context.user_data['cost_supplier'] = supplier_name
     
     # 显示金额输入界面
@@ -784,6 +804,30 @@ async def cost_supplier_handler(update: Update, context: ContextTypes.DEFAULT_TY
     
     return COST_AMOUNT
 
+async def custom_supplier_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理自定义供应商名称输入"""
+    # 检查是否正在等待自定义供应商输入
+    if not context.user_data.get('waiting_for_custom_supplier'):
+        return COST_SUPPLIER
+    
+    # 获取用户输入的供应商名称
+    supplier_name = update.message.text.strip()
+    context.user_data['cost_supplier'] = supplier_name
+    
+    # 清除等待标记
+    context.user_data.pop('waiting_for_custom_supplier', None)
+    
+    # 显示金额输入界面
+    keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_html(
+        f"🏭 <b>Supplier:</b> {supplier_name}\n\n<b>Please enter the amount:</b>",
+        reply_markup=reply_markup
+    )
+    
+    return COST_AMOUNT
+
 async def cost_amount_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """处理金额输入"""
     try:
@@ -793,9 +837,21 @@ async def cost_amount_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         amount = float(amount_text.replace(',', ''))
         context.user_data['cost_amount'] = amount
         
-        # 如果是采购支出，直接显示确认信息
+        # 对于所有采购支出，提示上传收据
         if context.user_data.get('cost_type') == "Purchasing":
-            return await show_cost_confirmation(update, context)
+            keyboard = [
+                [InlineKeyboardButton("📷 Upload Receipt", callback_data="upload_receipt")],
+                [InlineKeyboardButton("⏭️ Skip", callback_data="skip_receipt")],
+                [InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await update.message.reply_html(
+                f"💰 <b>Amount:</b> RM{amount:,.2f}\n\n<b>Would you like to upload a receipt?</b>",
+                reply_markup=reply_markup
+            )
+            
+            return COST_RECEIPT
         
         # 如果是其他支出但还没有描述，提示输入描述
         if context.user_data.get('cost_type') == "Other Expense" and 'cost_desc' not in context.user_data:
@@ -954,17 +1010,30 @@ async def show_cost_confirmation(update: Update, context: ContextTypes.DEFAULT_T
 <b>Please confirm the information:</b>
         """
     
-    if update.message:
-        await update.message.reply_html(
-            confirm_message,
-            reply_markup=reply_markup
-        )
-    else:
-        await update.callback_query.edit_message_text(
-            confirm_message,
-            parse_mode=ParseMode.HTML,
-            reply_markup=reply_markup
-        )
+    try:
+        if update.message:
+            await update.message.reply_html(
+                confirm_message,
+                reply_markup=reply_markup
+            )
+        elif update.callback_query:
+            await update.callback_query.edit_message_text(
+                confirm_message,
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
+            )
+        else:
+            logger.error("无法显示确认信息：update对象既没有message也没有callback_query属性")
+    except Exception as e:
+        logger.error(f"显示确认信息失败: {e}")
+        # 尝试发送错误消息
+        try:
+            if update.message:
+                await update.message.reply_text("❌ Error displaying confirmation, please try again")
+            elif update.callback_query:
+                await update.callback_query.edit_message_text("❌ Error displaying confirmation, please try again")
+        except Exception:
+            pass
     
     return COST_CONFIRM
 
@@ -1421,7 +1490,8 @@ def get_conversation_handlers():
                 CallbackQueryHandler(cost_type_handler, pattern="^cost_")
             ],
             COST_SUPPLIER: [
-                CallbackQueryHandler(cost_supplier_handler, pattern="^supplier_")
+                CallbackQueryHandler(cost_supplier_handler, pattern="^supplier_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, custom_supplier_handler)
             ],
             COST_AMOUNT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, cost_amount_handler)
@@ -1431,6 +1501,8 @@ def get_conversation_handlers():
             ],
             COST_RECEIPT: [
                 MessageHandler(filters.PHOTO | filters.Document.ALL, cost_receipt_handler),
+                CallbackQueryHandler(lambda u, c: show_cost_confirmation(u, c), pattern="^skip_receipt$"),
+                CallbackQueryHandler(receipt_upload_prompt, pattern="^upload_receipt$"),
                 CommandHandler("skip", lambda u, c: show_cost_confirmation(u, c))
             ],
             COST_CONFIRM: [
@@ -2032,3 +2104,20 @@ async def sales_agent_select_handler(update: Update, context: ContextTypes.DEFAU
     # 未知回调数据
     await query.edit_message_text("❌ Unknown operation, please start again")
     return ConversationHandler.END
+
+async def receipt_upload_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """提示用户上传收据"""
+    query = update.callback_query
+    await query.answer()
+    
+    keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        "📸 <b>Please upload a photo or document as receipt</b>\n\n"
+        "<i>You can also use /skip to continue without receipt</i>",
+        parse_mode=ParseMode.HTML,
+        reply_markup=reply_markup
+    )
+    
+    return COST_RECEIPT
