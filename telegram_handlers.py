@@ -61,13 +61,29 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    user = update.effective_user
-    await update.message.reply_html(
-        f"👋 <b>Hello {user.first_name}!</b>\n\n"
-        f"Welcome to the Business Management Bot.\n"
-        f"<b>Please select an option:</b>",
-        reply_markup=reply_markup
-    )
+    welcome_message = """
+🚀 *财务管理助手*
+
+👋 欢迎使用！请选择需要的功能：
+
+📊 *Sale Invoice* - 登记发票和佣金
+💵 *Coasting* - 记录各项支出
+📈 *Report* - 查看统计报告
+⚙️ *Setting* - 创建代理商/供应商
+    """
+    
+    if update.callback_query:
+        await update.callback_query.edit_message_text(
+            welcome_message, 
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=reply_markup
+        )
+    else:
+        await update.message.reply_text(
+            welcome_message, 
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=reply_markup
+        )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """处理 /help 命令和帮助回调"""
@@ -644,8 +660,8 @@ async def cost_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     
     keyboard = [
         [InlineKeyboardButton("🛒 Purchasing", callback_data="cost_purchasing")],
-        [InlineKeyboardButton("💸 Other Expense", callback_data="cost_other")],
-        [InlineKeyboardButton("📋 Expense List", callback_data="cost_list")],
+        [InlineKeyboardButton("💳 Billing", callback_data="cost_billing")],
+        [InlineKeyboardButton("👨‍💼 Worker Salary", callback_data="cost_salary")],
         [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="back_main")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -665,7 +681,8 @@ async def cost_type_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     
     cost_types = {
         "cost_purchasing": "Purchasing",
-        "cost_other": "Other Expense"
+        "cost_billing": "Billing",
+        "cost_salary": "Worker Salary"
     }
     
     context.user_data['cost_type'] = cost_types[query.data]
@@ -718,19 +735,32 @@ async def cost_type_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             )
             return ConversationHandler.END
     
-    elif query.data == "cost_other":
-        # 对于其他支出，直接输入项目名称
+    elif query.data == "cost_billing":
+        # 对于账单支出，直接输入项目名称
         keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
-            "📝 <b>Other Expense</b>\n\n<b>Please enter item description:</b>",
+            "📝 <b>Billing</b>\n\n<b>Please enter bill description:</b>",
             parse_mode=ParseMode.HTML,
             reply_markup=reply_markup
         )
         
         # 使用描述字段来存储项目名称
         return COST_DESC
+    
+    elif query.data == "cost_salary":
+        # 对于工资支出，直接输入金额
+        keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "💰 <b>Enter Salary Amount:</b>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+        
+        return COST_AMOUNT
     
     return ConversationHandler.END
 
@@ -857,65 +887,28 @@ async def cost_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         return ConversationHandler.END
 
-async def cost_list_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """查看费用记录"""
-    query = update.callback_query
-    await query.answer()
+async def cost_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理收据上传"""
+    # 这里可以处理照片或文件
+    if update.message.photo:
+        # 如果是照片，获取最高质量的照片ID
+        file_id = update.message.photo[-1].file_id
+        context.user_data['cost_receipt'] = file_id
+        context.user_data['cost_receipt_type'] = 'photo'
+    elif update.message.document:
+        # 如果是文件，获取文件ID
+        file_id = update.message.document.file_id
+        context.user_data['cost_receipt'] = file_id
+        context.user_data['cost_receipt_type'] = 'document'
+    else:
+        # 如果没有上传图片或文档，提示用户
+        await update.message.reply_html(
+            "⚠️ <b>Please upload a photo or document as receipt.</b>\n\nOr type /skip to continue without receipt."
+        )
+        return COST_RECEIPT
     
-    try:
-        sheets_manager = SheetsManager()
-        # 获取最近的费用记录
-        expense_records = sheets_manager.get_expense_records(month=None)
-        
-        if not expense_records:
-            message = "📋 <b>No expense records found</b>"
-        else:
-            # 表头映射
-            header_mapping = {
-                '日期': 'date',
-                '费用类型': 'type',
-                '供应商': 'supplier',
-                '金额': 'amount',
-                '类别': 'category',
-                '备注': 'description'
-            }
-            
-            # 转换记录中的键名
-            converted_records = []
-            for record in expense_records:
-                converted_record = {}
-                for zh_key, en_key in header_mapping.items():
-                    if zh_key in record:
-                        converted_record[en_key] = record[zh_key]
-                converted_records.append(converted_record)
-            
-            # 只显示最近10条记录
-            recent_records = converted_records[:10]
-            message = "📋 <b>RECENT EXPENSE RECORDS</b>\n\n"
-            for record in recent_records:
-                message += f"📅 <b>Date:</b> {record.get('date', 'N/A')}\n"
-                message += f"📋 <b>Type:</b> {record.get('type', 'N/A')} | 💰 <b>Amount:</b> RM{float(record.get('amount', 0)):,.2f}\n"
-                if record.get('supplier'):
-                    message += f"🏭 <b>Supplier:</b> {record.get('supplier')}\n"
-                if record.get('description'):
-                    message += f"📝 <b>Description:</b> {record.get('description')}\n"
-                message += "\n"
-        
-        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="menu_cost")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            message,
-            parse_mode=ParseMode.HTML,
-            reply_markup=reply_markup
-        )
-        
-    except Exception as e:
-        logger.error(f"获取费用记录失败: {e}")
-        await query.edit_message_text(
-            "❌ <b>Failed to get expense records</b>\n\nPlease try again later.",
-            parse_mode=ParseMode.HTML
-        )
+    # 继续到确认页面
+    return await show_cost_confirmation(update, context)
 
 # ====================================
 # 报表生成区 - 月度报表、自定义查询
@@ -1155,7 +1148,7 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     # 费用管理回调
     elif query.data == "back_cost":
         return await cost_menu(update, context)
-    elif query.data in ["cost_purchasing", "cost_other"]:
+    elif query.data in ["cost_purchasing", "cost_billing", "cost_salary"]:
         return await cost_type_handler(update, context)
     elif query.data == "cost_list":
         await cost_list_handler(update, context)
@@ -1316,9 +1309,8 @@ def get_conversation_handlers():
     # 费用管理会话处理器
     expenses_conversation = ConversationHandler(
         entry_points=[
-            CallbackQueryHandler(cost_type_handler, pattern="^cost_purchasing$|^cost_other$"),
+            CallbackQueryHandler(cost_type_handler, pattern="^cost_purchasing$|^cost_billing$|^cost_salary$"),
             CallbackQueryHandler(cost_menu, pattern="^menu_cost$"),
-            CallbackQueryHandler(cost_list_handler, pattern="^cost_list$")
         ],
         states={
             COST_TYPE: [
@@ -1759,16 +1751,23 @@ async def show_cost_confirmation(update: Update, context: ContextTypes.DEFAULT_T
 
 <b>Please confirm the information:</b>
         """
-    else:  # Other Expense
+    elif cost_type == "Billing":
         desc = context.user_data.get('cost_desc', '')
-        receipt = "Uploaded" if context.user_data.get('cost_receipt') else "Not Uploaded"
         confirm_message = f"""
 💵 <b>EXPENSE CONFIRMATION</b>
 
 📋 <b>Type:</b> {cost_type}
 📝 <b>Item:</b> {desc}
 💰 <b>Amount:</b> RM{amount:,.2f}
-🧾 <b>Receipt:</b> {receipt}
+
+<b>Please confirm the information:</b>
+        """
+    else:  # Worker Salary
+        confirm_message = f"""
+💵 <b>EXPENSE CONFIRMATION</b>
+
+📋 <b>Type:</b> {cost_type}
+💰 <b>Amount:</b> RM{amount:,.2f}
 
 <b>Please confirm the information:</b>
         """
@@ -1787,25 +1786,62 @@ async def show_cost_confirmation(update: Update, context: ContextTypes.DEFAULT_T
     
     return COST_CONFIRM
 
-async def cost_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理收据上传"""
-    # 这里可以处理照片或文件
-    if update.message.photo:
-        # 如果是照片，获取最高质量的照片ID
-        file_id = update.message.photo[-1].file_id
-        context.user_data['cost_receipt'] = file_id
-        context.user_data['cost_receipt_type'] = 'photo'
-    elif update.message.document:
-        # 如果是文件，获取文件ID
-        file_id = update.message.document.file_id
-        context.user_data['cost_receipt'] = file_id
-        context.user_data['cost_receipt_type'] = 'document'
-    else:
-        # 如果没有上传图片或文档，提示用户
-        await update.message.reply_html(
-            "⚠️ <b>Please upload a photo or document as receipt.</b>\n\nOr type /skip to continue without receipt."
-        )
-        return COST_RECEIPT
+async def cost_list_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """查看费用记录"""
+    query = update.callback_query
+    await query.answer()
     
-    # 继续到确认页面
-    return await show_cost_confirmation(update, context)
+    try:
+        sheets_manager = SheetsManager()
+        # 获取最近的费用记录
+        expense_records = sheets_manager.get_expense_records(month=None)
+        
+        if not expense_records:
+            message = "📋 <b>No expense records found</b>"
+        else:
+            # 表头映射
+            header_mapping = {
+                '日期': 'date',
+                '费用类型': 'type',
+                '供应商': 'supplier',
+                '金额': 'amount',
+                '类别': 'category',
+                '备注': 'description'
+            }
+            
+            # 转换记录中的键名
+            converted_records = []
+            for record in expense_records:
+                converted_record = {}
+                for zh_key, en_key in header_mapping.items():
+                    if zh_key in record:
+                        converted_record[en_key] = record[zh_key]
+                converted_records.append(converted_record)
+            
+            # 只显示最近10条记录
+            recent_records = converted_records[:10]
+            message = "📋 <b>RECENT EXPENSE RECORDS</b>\n\n"
+            for record in recent_records:
+                message += f"📅 <b>Date:</b> {record.get('date', 'N/A')}\n"
+                message += f"📋 <b>Type:</b> {record.get('type', 'N/A')} | 💰 <b>Amount:</b> RM{float(record.get('amount', 0)):,.2f}\n"
+                if record.get('supplier'):
+                    message += f"🏭 <b>Supplier:</b> {record.get('supplier')}\n"
+                if record.get('description'):
+                    message += f"📝 <b>Description:</b> {record.get('description')}\n"
+                message += "\n"
+        
+        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="menu_cost")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            message,
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+        
+    except Exception as e:
+        logger.error(f"获取费用记录失败: {e}")
+        await query.edit_message_text(
+            "❌ <b>Failed to get expense records</b>\n\nPlease try again later.",
+            parse_mode=ParseMode.HTML
+        )
