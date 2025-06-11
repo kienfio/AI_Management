@@ -214,7 +214,7 @@ async def sales_amount_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await update.message.reply_text(
-            f"💰 <b>Amount:</b> ¥{amount:,.2f}\n\n🎯 <b>Select Client Type:</b>",
+            f"💰 <b>Amount:</b> RM{amount:,.2f}\n\n🎯 <b>Select Client Type:</b>",
             parse_mode=ParseMode.HTML,
             reply_markup=reply_markup
         )
@@ -249,7 +249,140 @@ async def sales_client_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         # 跳转到确认界面
         return await show_sales_confirmation(update, context)
     
-    # 如果选择的是代理商，获取代理商列表
+    # 如果选择的是代理商，先让用户选择佣金计算方式
+    keyboard = [
+        [InlineKeyboardButton("💯 设置佣金百分比", callback_data="commission_percent")],
+        [InlineKeyboardButton("💰 直接输入佣金金额", callback_data="commission_amount")],
+        [InlineKeyboardButton("❌ 取消", callback_data="back_main")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        "🤝 <b>请选择佣金计算方式:</b>",
+        parse_mode=ParseMode.HTML,
+        reply_markup=reply_markup
+    )
+    
+    # 返回一个新的状态用于处理佣金计算方式选择
+    return SALES_COMMISSION_TYPE
+
+# 添加新的状态常量
+SALES_COMMISSION_TYPE = 21  # 用于选择佣金计算方式
+SALES_COMMISSION_PERCENT = 22  # 用于输入佣金百分比
+SALES_COMMISSION_AMOUNT = 23  # 用于直接输入佣金金额
+
+# 添加佣金计算方式选择处理函数
+async def sales_commission_type_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理佣金计算方式选择"""
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "commission_percent":
+        # 选择设置佣金百分比
+        keyboard = [[InlineKeyboardButton("❌ 取消", callback_data="back_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            f"💯 <b>请输入佣金百分比:</b>\n\n<i>例如: 输入 10 表示 10%</i>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+        return SALES_COMMISSION_PERCENT
+        
+    elif query.data == "commission_amount":
+        # 选择直接输入佣金金额
+        amount = context.user_data['sales_amount']
+        keyboard = [[InlineKeyboardButton("❌ 取消", callback_data="back_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            f"💰 <b>总金额:</b> RM{amount:,.2f}\n\n<b>请直接输入佣金金额:</b>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+        return SALES_COMMISSION_AMOUNT
+    
+    # 未知回调数据
+    await query.edit_message_text("❌ 未知操作，请重新开始")
+    return ConversationHandler.END
+
+# 添加佣金百分比输入处理函数
+async def sales_commission_percent_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理佣金百分比输入"""
+    logger.info(f"接收到佣金百分比输入: {update.message.text}")
+    
+    try:
+        # 解析百分比
+        percent_text = update.message.text.strip().replace('%', '')
+        percent = float(percent_text)
+        
+        # 验证百分比合理性
+        if percent < 0 or percent > 100:
+            await update.message.reply_text("⚠️ 请输入0-100之间的百分比")
+            return SALES_COMMISSION_PERCENT
+        
+        # 计算佣金
+        amount = context.user_data['sales_amount']
+        commission_rate = percent / 100
+        commission = amount * commission_rate
+        
+        # 保存数据
+        context.user_data['commission_rate'] = commission_rate
+        context.user_data['sales_commission'] = commission
+        context.user_data['commission_type'] = 'percent'
+        
+        # 进入代理商选择
+        return await show_agent_selection(update, context)
+        
+    except ValueError as e:
+        logger.error(f"百分比解析错误: {e}")
+        await update.message.reply_text("⚠️ 请输入有效的数字百分比")
+        return SALES_COMMISSION_PERCENT
+    except Exception as e:
+        logger.error(f"处理佣金百分比时发生错误: {e}")
+        await update.message.reply_text("❌ 处理出错，请重新输入")
+        return SALES_COMMISSION_PERCENT
+
+# 添加佣金金额输入处理函数
+async def sales_commission_amount_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理直接输入的佣金金额"""
+    logger.info(f"接收到佣金金额输入: {update.message.text}")
+    
+    try:
+        # 解析金额
+        amount_text = update.message.text.strip()
+        clean_amount = amount_text.replace(',', '').replace('RM', '').replace('¥', '').replace('$', '').replace('€', '')
+        commission = float(clean_amount)
+        
+        # 验证佣金合理性
+        total_amount = context.user_data['sales_amount']
+        if commission < 0 or commission > total_amount:
+            await update.message.reply_text(f"⚠️ 佣金不能小于0或大于总金额 RM{total_amount:,.2f}")
+            return SALES_COMMISSION_AMOUNT
+        
+        # 计算佣金比例
+        commission_rate = commission / total_amount if total_amount > 0 else 0
+        
+        # 保存数据
+        context.user_data['commission_rate'] = commission_rate
+        context.user_data['sales_commission'] = commission
+        context.user_data['commission_type'] = 'fixed'
+        
+        # 进入代理商选择
+        return await show_agent_selection(update, context)
+        
+    except ValueError as e:
+        logger.error(f"佣金金额解析错误: {e}")
+        await update.message.reply_text("⚠️ 请输入有效的金额数字")
+        return SALES_COMMISSION_AMOUNT
+    except Exception as e:
+        logger.error(f"处理佣金金额时发生错误: {e}")
+        await update.message.reply_text("❌ 处理出错，请重新输入")
+        return SALES_COMMISSION_AMOUNT
+
+# 添加辅助函数来显示代理商选择
+async def show_agent_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """显示代理商选择界面"""
     try:
         # 获取代理商列表
         sheets_manager = SheetsManager()
@@ -261,7 +394,7 @@ async def sales_client_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                         [InlineKeyboardButton("❌ 取消", callback_data="back_main")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            await query.edit_message_text(
+            await update.message.reply_text(
                 "⚠️ <b>未找到代理商数据</b>\n\n请先创建代理商后再使用此功能。",
                 parse_mode=ParseMode.HTML,
                 reply_markup=reply_markup
@@ -273,74 +406,41 @@ async def sales_client_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         for agent in agents:
             # 使用姓名作为按钮文本
             name = agent.get('姓名', '')
-            commission = agent.get('佣金比例', '')
-            display_text = f"{name}"
-            if commission:
-                display_text += f" ({commission})"
-                
             if name:
-                keyboard.append([InlineKeyboardButton(f"🤝 {display_text}", callback_data=f"agent_{name}_{commission}")])
+                keyboard.append([InlineKeyboardButton(f"🤝 {name}", callback_data=f"agent_{name}")])
         
         # 添加取消按钮
         keyboard.append([InlineKeyboardButton("❌ 取消", callback_data="back_main")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await query.edit_message_text(
-            "🤝 <b>请选择代理商:</b>",
+        # 显示佣金信息
+        amount = context.user_data['sales_amount']
+        commission = context.user_data['sales_commission']
+        commission_rate = context.user_data.get('commission_rate', 0) * 100
+        
+        message = f"""
+💰 <b>总金额:</b> RM{amount:,.2f}
+💵 <b>佣金:</b> RM{commission:,.2f} ({commission_rate:.1f}%)
+
+🤝 <b>请选择代理商:</b>
+"""
+        
+        await update.message.reply_text(
+            message,
             parse_mode=ParseMode.HTML,
             reply_markup=reply_markup
         )
         
-        # 返回一个新的状态用于处理代理商选择
+        # 返回代理商选择状态
         return SALES_AGENT_SELECT
         
     except Exception as e:
         logger.error(f"获取代理商列表失败: {e}")
-        await query.edit_message_text(
+        await update.message.reply_text(
             "❌ <b>获取代理商数据失败</b>\n\n请稍后再试。",
             parse_mode=ParseMode.HTML
         )
         return ConversationHandler.END
-
-# 添加一个新的状态常量
-SALES_AGENT_SELECT = 20  # 使用一个新的状态码
-
-# 添加代理商选择处理函数
-async def sales_agent_select_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理代理商选择"""
-    query = update.callback_query
-    await query.answer()
-    
-    agent_data = query.data
-    if agent_data.startswith("agent_"):
-        # 解析代理商数据 agent_{name}_{commission}
-        parts = agent_data[6:].split('_')
-        if len(parts) >= 1:
-            agent_name = parts[0]
-            context.user_data['sales_agent'] = agent_name
-            
-            # 如果有佣金比例，解析并计算佣金
-            commission_rate = 0.08  # 默认佣金比例
-            if len(parts) >= 2 and parts[1]:
-                try:
-                    # 尝试解析佣金比例，可能是 "5%" 这样的格式
-                    commission_str = parts[1].replace('%', '')
-                    commission_rate = float(commission_str) / 100
-                except ValueError:
-                    pass
-            
-            amount = context.user_data['sales_amount']
-            commission = amount * commission_rate
-            
-            context.user_data['sales_commission'] = commission
-            context.user_data['commission_rate'] = commission_rate
-            
-            # 跳转到确认界面
-            return await show_sales_confirmation(update, context)
-    
-    # 未知回调数据
-    await query.edit_message_text("❌ 未知操作，请重新开始")
-    return ConversationHandler.END
 
 # 创建一个辅助函数来显示确认信息
 async def show_sales_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -370,9 +470,9 @@ async def show_sales_confirmation(update: Update, context: ContextTypes.DEFAULT_
 📊 <b>INVOICE CONFIRMATION</b>
 
 👤 <b>Person in Charge:</b> {person}
-💰 <b>Amount:</b> ¥{amount:,.2f}
+💰 <b>Amount:</b> RM{amount:,.2f}
 🎯 <b>Client Type:</b> {client_display}
-💵 <b>Commission:</b> ¥{commission:,.2f} ({commission_rate:.1f}%)
+💵 <b>Commission:</b> RM{commission:,.2f} ({commission_rate:.1f}%)
 
 <b>Please confirm the information:</b>
     """
@@ -408,6 +508,14 @@ async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             agent_info = context.user_data['sales_agent']
             client_type = f"{client_type}: {agent_info}"
         
+        # 获取佣金计算方式
+        commission_type = context.user_data.get('commission_type', '')
+        commission_note = ""
+        if commission_type == 'percent':
+            commission_note = "按百分比计算佣金"
+        elif commission_type == 'fixed':
+            commission_note = "固定佣金金额"
+        
         sales_data = {
             'date': datetime.now().strftime('%Y-%m-%d %H:%M'),
             'person': context.user_data['sales_person'],
@@ -415,16 +523,30 @@ async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             'client_type': client_type,
             'commission_rate': context.user_data.get('commission_rate', 0),
             'commission_amount': context.user_data['sales_commission'],
-            'notes': f"Agent: {agent_info}" if agent_info else ""
+            'notes': f"Agent: {agent_info}" + (f", {commission_note}" if commission_note else "")
         }
         
         sheets_manager.add_sales_record(sales_data)
         
-        keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="back_main")]]
+        # 显示成功消息，包含保存的信息
+        amount = context.user_data['sales_amount']
+        commission = context.user_data['sales_commission']
+        person = context.user_data['sales_person']
+        
+        success_message = f"""
+✅ <b>销售记录保存成功!</b>
+
+👤 <b>负责人:</b> {person}
+💰 <b>金额:</b> RM{amount:,.2f}
+💵 <b>佣金:</b> RM{commission:,.2f}
+🕒 <b>时间:</b> {datetime.now().strftime('%Y-%m-%d %H:%M')}
+"""
+        
+        keyboard = [[InlineKeyboardButton("🔙 返回主菜单", callback_data="back_main")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
-            "✅ <b>Invoice saved successfully!</b>",
+            success_message,
             parse_mode=ParseMode.HTML,
             reply_markup=reply_markup
         )
@@ -432,7 +554,7 @@ async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     except Exception as e:
         logger.error(f"保存销售记录失败: {e}")
         await query.edit_message_text(
-            "❌ <b>Failed to save. Please try again.</b>",
+            "❌ <b>保存失败，请重试。</b>",
             parse_mode=ParseMode.HTML
         )
     
@@ -456,7 +578,7 @@ async def sales_list_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             for record in sales_records:
                 message += f"📅 {record['date']}\n"
                 message += f"👤 {record['person']} | 🎯 {record['client_type']}\n"
-                message += f"💰 ¥{record['amount']:,.2f} | 💵 ¥{record['commission']:,.2f}\n\n"
+                message += f"💰 RM{record['amount']:,.2f} | 💵 RM{record['commission']:,.2f}\n\n"
         
         keyboard = [[InlineKeyboardButton("🔙 返回销售菜单", callback_data="menu_sales")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1070,6 +1192,9 @@ def get_conversation_handlers():
             ],
             SALES_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, sales_amount_handler)],
             SALES_CLIENT: [CallbackQueryHandler(sales_client_handler, pattern="^client_")],
+            SALES_COMMISSION_TYPE: [CallbackQueryHandler(sales_commission_type_handler, pattern="^commission_")],
+            SALES_COMMISSION_PERCENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, sales_commission_percent_handler)],
+            SALES_COMMISSION_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, sales_commission_amount_handler)],
             SALES_AGENT_SELECT: [CallbackQueryHandler(sales_agent_select_handler, pattern="^agent_")],
             SALES_CONFIRM: [CallbackQueryHandler(sales_save_handler, pattern="^sales_save$")]
         },
@@ -1432,3 +1557,26 @@ async def sale_invoice_command(update: Update, context: ContextTypes.DEFAULT_TYP
                 parse_mode=ParseMode.HTML
             )
         return ConversationHandler.END
+
+# 添加一个新的状态常量
+SALES_AGENT_SELECT = 20  # 使用一个新的状态码
+
+# 添加代理商选择处理函数
+async def sales_agent_select_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理代理商选择"""
+    query = update.callback_query
+    await query.answer()
+    
+    agent_data = query.data
+    if agent_data.startswith("agent_"):
+        # 解析代理商数据 agent_{name}
+        agent_name = agent_data[6:]
+        context.user_data['sales_agent'] = agent_name
+        
+        # 佣金率和佣金已经在之前的步骤中设置好了
+        # 现在直接跳转到确认界面
+        return await show_sales_confirmation(update, context)
+    
+    # 未知回调数据
+    await query.edit_message_text("❌ 未知操作，请重新开始")
+    return ConversationHandler.END
