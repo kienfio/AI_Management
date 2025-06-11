@@ -681,10 +681,50 @@ async def cost_type_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     cost_types = {
         "cost_purchasing": "Purchasing",
         "cost_billing": "Billing",
-        "cost_salary": "Worker Salary"
+        "cost_salary": "Worker Salary",
+        "billing_water": "Water Bill",
+        "billing_electricity": "Electricity Bill",
+        "billing_wifi": "WiFi Bill",
+        "billing_other": "Other Bill"
     }
     
-    context.user_data['cost_type'] = cost_types[query.data]
+    # 对于账单子类型的处理
+    if query.data.startswith("billing_"):
+        context.user_data['cost_type'] = cost_types[query.data]
+        
+        # 特殊处理 "Other Bill" 类型，让用户输入自定义描述
+        if query.data == "billing_other":
+            keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                "📝 <b>Other Bill</b>\n\n<b>Please enter bill description:</b>",
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
+            )
+            
+            # 设置标记，表示等待自定义账单描述
+            context.user_data['waiting_for_bill_desc'] = True
+            return COST_DESC
+        
+        # 其他账单类型直接使用预设描述
+        context.user_data['cost_desc'] = cost_types[query.data]  # 将账单类型存储为描述
+        
+        # 直接跳转到金额输入
+        keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            f"📝 <b>{cost_types[query.data]}</b>\n\n<b>Please enter the amount:</b>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+        
+        return COST_AMOUNT
+    
+    # 普通费用类型处理
+    if query.data in cost_types:
+        context.user_data['cost_type'] = cost_types[query.data]
     
     if query.data == "cost_purchasing":
         # 对于采购支出，需要选择供应商
@@ -738,18 +778,24 @@ async def cost_type_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return ConversationHandler.END
     
     elif query.data == "cost_billing":
-        # 对于账单支出，直接输入项目名称
-        keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
+        # 对于账单支出，显示账单类型选项
+        keyboard = [
+            [InlineKeyboardButton("💧 Water", callback_data="billing_water")],
+            [InlineKeyboardButton("⚡ Electricity", callback_data="billing_electricity")],
+            [InlineKeyboardButton("📶 WiFi", callback_data="billing_wifi")],
+            [InlineKeyboardButton("✏️ Other", callback_data="billing_other")],
+            [InlineKeyboardButton("🔙 Back", callback_data="back_cost")]
+        ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
-            "📝 <b>Billing</b>\n\n<b>Please enter bill description:</b>",
+            "📝 <b>BILLING</b>\n\n<b>Please select the billing type:</b>",
             parse_mode=ParseMode.HTML,
             reply_markup=reply_markup
         )
         
-        # 使用描述字段来存储项目名称
-        return COST_DESC
+        # 返回同一状态，等待子类型选择
+        return COST_TYPE
     
     elif query.data == "cost_salary":
         # 对于工资支出，直接输入金额
@@ -837,8 +883,9 @@ async def cost_amount_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         amount = float(amount_text.replace(',', ''))
         context.user_data['cost_amount'] = amount
         
-        # 对于所有采购支出，提示上传收据
-        if context.user_data.get('cost_type') == "Purchasing":
+        # 对于所有采购支出和账单支出，提示上传收据
+        cost_type = context.user_data.get('cost_type', '')
+        if cost_type == "Purchasing" or cost_type.endswith("Bill"):
             keyboard = [
                 [InlineKeyboardButton("📷 Upload Receipt", callback_data="upload_receipt")],
                 [InlineKeyboardButton("⏭️ Skip", callback_data="skip_receipt")],
@@ -884,7 +931,27 @@ async def cost_desc_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     desc = update.message.text.strip()
     context.user_data['cost_desc'] = desc
     
-    # 提示输入金额
+    # 检查是否是自定义账单描述
+    if context.user_data.get('waiting_for_bill_desc'):
+        # 清除等待标记
+        context.user_data.pop('waiting_for_bill_desc', None)
+        
+        # 保存自定义账单描述，修改类型为自定义类型+描述
+        custom_type = f"Other Bill: {desc}"
+        context.user_data['cost_type'] = custom_type
+        
+        # 提示输入金额
+        keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_html(
+            f"📝 <b>Bill Description:</b> {desc}\n\n<b>Please enter the amount:</b>",
+            reply_markup=reply_markup
+        )
+        
+        return COST_AMOUNT
+    
+    # 常规描述处理
     keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -989,9 +1056,33 @@ async def show_cost_confirmation(update: Update, context: ContextTypes.DEFAULT_T
 
 <b>Please confirm the information:</b>
         """
-    elif cost_type == "Billing":
+    elif cost_type.endswith("Bill") or cost_type == "Billing":
         desc = context.user_data.get('cost_desc', '')
-        confirm_message = f"""
+        
+        # 如果是标准账单类型，则使用 Type 显示账单类型
+        if cost_type in ["Water Bill", "Electricity Bill", "WiFi Bill"]:
+            confirm_message = f"""
+💵 <b>EXPENSE CONFIRMATION</b>
+
+📋 <b>Type:</b> {cost_type}
+💰 <b>Amount:</b> RM{amount:,.2f}
+
+<b>Please confirm the information:</b>
+            """
+        # 如果是自定义账单类型，显示描述
+        elif cost_type.startswith("Other Bill:"):
+            confirm_message = f"""
+💵 <b>EXPENSE CONFIRMATION</b>
+
+📋 <b>Type:</b> Other Bill
+📝 <b>Description:</b> {desc}
+💰 <b>Amount:</b> RM{amount:,.2f}
+
+<b>Please confirm the information:</b>
+            """
+        # 传统 Billing 类型
+        else:
+            confirm_message = f"""
 💵 <b>EXPENSE CONFIRMATION</b>
 
 📋 <b>Type:</b> {cost_type}
@@ -999,7 +1090,7 @@ async def show_cost_confirmation(update: Update, context: ContextTypes.DEFAULT_T
 💰 <b>Amount:</b> RM{amount:,.2f}
 
 <b>Please confirm the information:</b>
-        """
+            """
     else:  # Worker Salary
         confirm_message = f"""
 💵 <b>EXPENSE CONFIRMATION</b>
