@@ -37,7 +37,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await close_other_conversations(update, context)
     
     keyboard = [
-        [InlineKeyboardButton("📊 Sale Invoice", callback_data="menu_sales")],
+        [InlineKeyboardButton("📊 新增销售记录", callback_data="menu_sales")],
         [InlineKeyboardButton("💰 费用管理", callback_data="menu_cost")],
         [InlineKeyboardButton("📈 报表生成", callback_data="menu_report")],
         [InlineKeyboardButton("⚙️ System Settings", callback_data="menu_setting")],
@@ -50,7 +50,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 👋 欢迎使用！请选择需要的功能：
 
-📊 *Sale Invoice* - 登记发票和佣金
+📊 *新增销售记录* - 登记发票和佣金
 💰 *费用管理* - 记录各项支出
 📈 *报表生成* - 查看统计报告
 ⚙️ *System Settings* - 创建代理商/供应商
@@ -862,7 +862,56 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     
     # 各功能菜单回调
     elif query.data == "menu_sales":
-        return await sales_menu(update, context)
+        # 直接进入新增销售记录功能，而不是显示销售管理菜单
+        # 清除用户数据
+        context.user_data.clear()
+        
+        try:
+            # 获取负责人列表
+            sheets_manager = SheetsManager()
+            pics = sheets_manager.get_pics(active_only=True)
+            
+            if not pics:
+                # 如果没有负责人数据，显示提示信息
+                keyboard = [[InlineKeyboardButton("⚙️ 创建负责人", callback_data="setting_create_pic")],
+                            [InlineKeyboardButton("❌ 取消", callback_data="back_main")]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await query.edit_message_text(
+                    "⚠️ <b>未找到负责人数据</b>\n\n请先创建负责人后再使用此功能。",
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=reply_markup
+                )
+                return ConversationHandler.END
+            
+            # 创建负责人选择按钮
+            keyboard = []
+            for pic in pics:
+                # 使用姓名作为按钮文本
+                name = pic.get('姓名', '')
+                if name:
+                    keyboard.append([InlineKeyboardButton(f"👤 {name}", callback_data=f"pic_{name}")])
+            
+            # 添加取消按钮
+            keyboard.append([InlineKeyboardButton("❌ 取消", callback_data="back_main")])
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                "👤 <b>请选择负责人:</b>",
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
+            )
+            
+            # 返回的是新的状态，因为我们需要一个回调来处理选择
+            return SALES_PERSON
+            
+        except Exception as e:
+            logger.error(f"获取负责人列表失败: {e}")
+            await query.edit_message_text(
+                "❌ <b>获取负责人数据失败</b>\n\n请稍后再试。",
+                parse_mode=ParseMode.HTML
+            )
+            return ConversationHandler.END
     elif query.data == "menu_cost":
         return await cost_menu(update, context)
     elif query.data == "menu_report":
