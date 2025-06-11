@@ -72,18 +72,25 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 ⚙️ *Setting* - 创建代理商/供应商
     """
     
+    # 检查是通过回调查询还是直接命令调用
     if update.callback_query:
         await update.callback_query.edit_message_text(
             welcome_message, 
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=reply_markup
         )
-    else:
+    elif update.message:
         await update.message.reply_text(
             welcome_message, 
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=reply_markup
         )
+    else:
+        # 如果既不是回调查询也不是消息，记录错误
+        logger.error("无法显示主菜单：update对象既没有callback_query也没有message属性")
+        return ConversationHandler.END
+        
+    return ConversationHandler.END
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """处理 /help 命令和帮助回调"""
@@ -1094,8 +1101,50 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     
     # 主菜单回调
     if query.data == "back_main":
-        await start_command(update, context)
-        return ConversationHandler.END
+        try:
+            # 直接在当前消息上显示主菜单
+            keyboard = [
+                [InlineKeyboardButton("📊 Sale Invoice", callback_data="sales_add")],
+                [InlineKeyboardButton("💵 Coasting", callback_data="menu_cost")],
+                [InlineKeyboardButton("📈 Report", callback_data="menu_report")],
+                [InlineKeyboardButton("⚙️ Setting", callback_data="menu_setting")],
+                [InlineKeyboardButton("❓ Help", callback_data="menu_help")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            welcome_message = """
+🚀 *财务管理助手*
+
+👋 欢迎使用！请选择需要的功能：
+
+📊 *Sale Invoice* - 登记发票和佣金
+💵 *Coasting* - 记录各项支出
+📈 *Report* - 查看统计报告
+⚙️ *Setting* - 创建代理商/供应商
+            """
+            
+            await query.edit_message_text(
+                welcome_message, 
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=reply_markup
+            )
+            
+            # 清除用户数据
+            context.user_data.clear()
+            return ConversationHandler.END
+        except Exception as e:
+            logger.error(f"返回主菜单失败: {e}")
+            # 尝试发送错误消息
+            try:
+                keyboard = [[InlineKeyboardButton("🏠 返回主菜单", callback_data="back_main")]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await query.edit_message_text(
+                    "❌ 系统出现错误，请稍后重试",
+                    reply_markup=reply_markup
+                )
+            except Exception as e2:
+                logger.error(f"发送错误消息失败: {e2}")
+            return ConversationHandler.END
     
     # 各功能菜单回调
     elif query.data == "menu_sales":
@@ -1254,17 +1303,20 @@ def get_conversation_handlers():
     
     global sales_conversation, expenses_conversation, report_conversation, setting_conversation
     
-    # Setting命令会话处理器
+    # 系统设置会话处理器
     setting_conversation = ConversationHandler(
         entry_points=[
+            CallbackQueryHandler(setting_category_handler, pattern="^setting_create_"),
             CommandHandler("Setting", setting_command),
-            CallbackQueryHandler(setting_category_handler, pattern="^setting_create_")
+            # 添加菜单入口点
+            CallbackQueryHandler(lambda u, c: setting_command(u, c), pattern="^menu_setting$")
         ],
         states={
             SETTING_CATEGORY: [CallbackQueryHandler(setting_category_handler, pattern="^setting_create_")],
             SETTING_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, setting_name_handler)],
             SETTING_IC: [MessageHandler(filters.TEXT & ~filters.COMMAND, setting_ic_handler)],
-            SETTING_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, setting_type_handler)]
+            SETTING_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, setting_type_handler)],
+            SETTING_RATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, setting_rate_handler)]
         },
         fallbacks=[
             CallbackQueryHandler(callback_query_handler),
@@ -1295,7 +1347,7 @@ def get_conversation_handlers():
             SALES_AGENT_SELECT: [CallbackQueryHandler(sales_agent_select_handler, pattern="^agent_")],
             SALES_CONFIRM: [
                 CallbackQueryHandler(sales_save_handler, pattern="^sales_save$"),
-                CallbackQueryHandler(lambda u, c: start_command(u, c), pattern="^back_main$")
+                CallbackQueryHandler(callback_query_handler, pattern="^back_main$")
             ]
         },
         fallbacks=[
@@ -1311,6 +1363,7 @@ def get_conversation_handlers():
         entry_points=[
             CallbackQueryHandler(cost_type_handler, pattern="^cost_purchasing$|^cost_billing$|^cost_salary$"),
             CallbackQueryHandler(cost_menu, pattern="^menu_cost$"),
+            CallbackQueryHandler(cost_list_handler, pattern="^cost_list$")
         ],
         states={
             COST_TYPE: [
@@ -1335,7 +1388,7 @@ def get_conversation_handlers():
         },
         fallbacks=[
             CallbackQueryHandler(lambda u, c: cost_menu(u, c), pattern="^back_cost$"),
-            CallbackQueryHandler(lambda u, c: start_command(u, c), pattern="^back_main$"),
+            CallbackQueryHandler(callback_query_handler, pattern="^back_main$"),
             CommandHandler("cancel", cancel_command)
         ],
         name="cost_conversation",
@@ -1560,37 +1613,100 @@ async def setting_ic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return ConversationHandler.END
 
 async def setting_type_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理供应商类别输入"""
-    supplier_type = update.message.text.strip()
-    name = context.user_data.get('setting_name')
+    """处理类型输入"""
+    type_value = update.message.text.strip()
+    context.user_data['setting_type'] = type_value
     
+    category = context.user_data.get('setting_category')
+    name = context.user_data.get('setting_name')
+    ic = context.user_data.get('setting_ic', '')
+    
+    # 如果是代理商，需要输入佣金比例
+    if category == "agent":
+        keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_html(
+            f"👨‍💼 <b>Name:</b> {name}\n<b>IC:</b> {ic}\n<b>Type:</b> {type_value}\n\n<b>Please enter commission rate (e.g. 5%):</b>",
+            reply_markup=reply_markup
+        )
+        return SETTING_RATE
+    
+    # 其他类型，直接保存
     try:
         sheets_manager = SheetsManager()
         
-        # 添加供应商，包含类别
-        supplier_data = {
-            'name': name,
-            'type': supplier_type,
-            'status': '激活'
+        if category == "supplier":
+            data = {
+                'name': name,
+                'contact': ic,
+                'phone': '',
+                'email': '',
+                'products': type_value,
+                'status': '激活'
+            }
+            sheets_manager.add_supplier(data)
+        elif category == "worker":
+            data = {
+                'name': name,
+                'contact': ic,
+                'phone': '',
+                'position': type_value,
+                'status': '激活'
+            }
+            sheets_manager.add_worker(data)
+        elif category == "pic":
+            data = {
+                'name': name,
+                'contact': ic,
+                'phone': '',
+                'department': type_value,
+                'status': '激活'
+            }
+            sheets_manager.add_pic(data)
+        
+        # 显示成功消息
+        category_names = {
+            "agent": "Agent",
+            "supplier": "Supplier",
+            "worker": "Worker",
+            "pic": "Person in Charge"
         }
         
-        sheets_manager.add_supplier(supplier_data)
+        category_emojis = {
+            "agent": "👨‍💼",
+            "supplier": "🏭",
+            "worker": "👷",
+            "pic": "👑"
+        }
         
-        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="back_main")]]
+        emoji = category_emojis.get(category, "➕")
+        category_name = category_names.get(category, "Item")
+        
+        success_message = f"{emoji} <b>{category_name} created successfully!</b>\n\n"
+        success_message += f"<b>Name:</b> {name}\n"
+        
+        if ic:
+            success_message += f"<b>IC/Contact:</b> {ic}\n"
+        if type_value:
+            success_message += f"<b>Type:</b> {type_value}\n"
+        
+        keyboard = [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="back_main")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await update.message.reply_text(
-            f"✅ Supplier \"{name}\" (Category: {supplier_type}) has been successfully added!",
-            parse_mode=ParseMode.MARKDOWN,
+        await update.message.reply_html(
+            success_message,
             reply_markup=reply_markup
         )
         
+        # 清除用户数据
+        context.user_data.clear()
+        return ConversationHandler.END
+        
     except Exception as e:
-        logger.error(f"添加供应商失败: {e}")
-        await update.message.reply_text("❌ Failed to add. Please try again.")
-    
-    context.user_data.clear()
-    return ConversationHandler.END
+        logger.error(f"保存设置失败: {e}")
+        await update.message.reply_text("❌ <b>Failed to save</b>\n\nPlease try again later.", parse_mode=ParseMode.HTML)
+        return ConversationHandler.END
 
 async def sale_invoice_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """处理 /SaleInvoice 命令或 menu_sales 回调 - 直接开始添加销售记录"""
@@ -1627,156 +1743,6 @@ async def sale_invoice_command(update: Update, context: ContextTypes.DEFAULT_TYP
                 )
             return ConversationHandler.END
         
-        # 创建负责人选择按钮
-        keyboard = []
-        for pic in pics:
-            # 使用姓名作为按钮文本
-            name = pic.get('姓名', '')
-            if name:
-                keyboard.append([InlineKeyboardButton(f"👤 {name}", callback_data=f"pic_{name}")])
-        
-        # 添加取消按钮
-        keyboard.append([InlineKeyboardButton("❌ 取消", callback_data="back_main")])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        message = "👤 <b>请选择负责人:</b>"
-        
-        if is_callback:
-            await update.callback_query.edit_message_text(
-                message,
-                parse_mode=ParseMode.HTML,
-                reply_markup=reply_markup
-            )
-        else:
-            await update.message.reply_text(
-                message,
-                parse_mode=ParseMode.HTML,
-                reply_markup=reply_markup
-            )
-        
-        logger.info("已显示负责人选择界面")
-        # 返回的是新的状态，因为我们需要一个回调来处理选择
-        return SALES_PERSON
-        
-    except Exception as e:
-        logger.error(f"获取负责人列表失败: {e}")
-        error_message = "❌ <b>获取负责人数据失败</b>\n\n请稍后再试。"
-        
-        if is_callback:
-            await update.callback_query.edit_message_text(
-                error_message,
-                parse_mode=ParseMode.HTML
-            )
-        else:
-            await update.message.reply_text(
-                error_message,
-                parse_mode=ParseMode.HTML
-            )
-        return ConversationHandler.END
-
-# 添加一个新的状态常量
-SALES_AGENT_SELECT = 20  # 使用一个新的状态码
-
-# 添加代理商选择处理函数
-async def sales_agent_select_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理代理商选择"""
-    query = update.callback_query
-    await query.answer()
-    
-    agent_data = query.data
-    if agent_data.startswith("agent_"):
-        # 解析代理商数据 agent_{name}_{commission}
-        parts = agent_data[6:].split('_')
-        if len(parts) >= 1:
-            agent_name = parts[0]
-            context.user_data['sales_agent'] = agent_name
-            
-            # 获取代理商默认佣金比例（如果有）
-            default_commission = ""
-            if len(parts) >= 2:
-                default_commission = parts[1]
-            
-            # 显示佣金计算方式选择界面
-            amount = context.user_data['sales_amount']
-            
-            keyboard = [
-                [InlineKeyboardButton("💯 Set Commission Percentage", callback_data="commission_percent")],
-                [InlineKeyboardButton("💰 Enter Fixed Commission Amount", callback_data="commission_amount")],
-                [InlineKeyboardButton("❌ Cancel", callback_data="back_main")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            message = f"""
-🤝 <b>Agent:</b> {agent_name}
-💰 <b>Amount:</b> RM{amount:,.2f}
-{f"💵 <b>Default Commission Rate:</b> {default_commission}" if default_commission else ""}
-
-<b>Please select commission calculation method:</b>
-"""
-            
-            await query.edit_message_text(
-                message,
-                parse_mode=ParseMode.HTML,
-                reply_markup=reply_markup
-            )
-            
-            # 返回佣金计算方式选择状态
-            return SALES_COMMISSION_TYPE
-    
-    # 未知回调数据
-    await query.edit_message_text("❌ Unknown operation, please start again")
-    return ConversationHandler.END
-
-async def show_cost_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """显示费用确认信息"""
-    # 生成确认信息
-    cost_type = context.user_data['cost_type']
-    amount = context.user_data['cost_amount']
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Save", callback_data="cost_save")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    # 构建确认消息
-    if cost_type == "Purchasing":
-        supplier = context.user_data.get('cost_supplier', '')
-        confirm_message = f"""
-💵 <b>EXPENSE CONFIRMATION</b>
-
-📋 <b>Type:</b> {cost_type}
-🏭 <b>Supplier:</b> {supplier}
-💰 <b>Amount:</b> RM{amount:,.2f}
-
-<b>Please confirm the information:</b>
-        """
-    elif cost_type == "Billing":
-        desc = context.user_data.get('cost_desc', '')
-        confirm_message = f"""
-💵 <b>EXPENSE CONFIRMATION</b>
-
-📋 <b>Type:</b> {cost_type}
-📝 <b>Item:</b> {desc}
-💰 <b>Amount:</b> RM{amount:,.2f}
-
-<b>Please confirm the information:</b>
-        """
-    else:  # Worker Salary
-        confirm_message = f"""
-💵 <b>EXPENSE CONFIRMATION</b>
-
-📋 <b>Type:</b> {cost_type}
-💰 <b>Amount:</b> RM{amount:,.2f}
-
-<b>Please confirm the information:</b>
-        """
-    
-    if update.message:
-        await update.message.reply_html(
-            confirm_message,
-            reply_markup=reply_markup
-        )
     else:
         await update.callback_query.edit_message_text(
             confirm_message,
@@ -1845,3 +1811,86 @@ async def cost_list_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             "❌ <b>Failed to get expense records</b>\n\nPlease try again later.",
             parse_mode=ParseMode.HTML
         )
+
+async def setting_rate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理代理商佣金比例输入"""
+    rate_input = update.message.text.strip()
+    
+    try:
+        # 尝试将输入转换为浮点数
+        rate = float(rate_input.replace('%', '')) / 100
+        if rate < 0 or rate > 1:
+            await update.message.reply_text("⚠️ <b>Invalid rate</b>\n\nPlease enter a percentage between 0-100%.", parse_mode=ParseMode.HTML)
+            return SETTING_RATE
+            
+        context.user_data['setting_rate'] = rate
+        
+        # 获取之前收集的数据
+        category = context.user_data.get('setting_category')
+        name = context.user_data.get('setting_name')
+        ic = context.user_data.get('setting_ic', '')
+        type_value = context.user_data.get('setting_type', '')
+        
+        # 保存到Google Sheets
+        try:
+            sheets_manager = SheetsManager()
+            
+            if category == "agent":
+                data = {
+                    'name': name,
+                    'contact': ic,
+                    'phone': '',
+                    'email': '',
+                    'commission_rate': rate,
+                    'status': '激活'
+                }
+                sheets_manager.add_agent(data)
+            
+            # 显示成功消息
+            category_names = {
+                "agent": "Agent",
+                "supplier": "Supplier",
+                "worker": "Worker",
+                "pic": "Person in Charge"
+            }
+            
+            category_emojis = {
+                "agent": "👨‍💼",
+                "supplier": "🏭",
+                "worker": "👷",
+                "pic": "👑"
+            }
+            
+            emoji = category_emojis.get(category, "➕")
+            category_name = category_names.get(category, "Item")
+            
+            success_message = f"{emoji} <b>{category_name} created successfully!</b>\n\n"
+            success_message += f"<b>Name:</b> {name}\n"
+            
+            if ic:
+                success_message += f"<b>IC/Contact:</b> {ic}\n"
+            if type_value:
+                success_message += f"<b>Type:</b> {type_value}\n"
+            if rate:
+                success_message += f"<b>Commission Rate:</b> {rate*100:.1f}%\n"
+            
+            keyboard = [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="back_main")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await update.message.reply_html(
+                success_message,
+                reply_markup=reply_markup
+            )
+            
+            # 清除用户数据
+            context.user_data.clear()
+            return ConversationHandler.END
+            
+        except Exception as e:
+            logger.error(f"保存设置失败: {e}")
+            await update.message.reply_text("❌ <b>Failed to save</b>\n\nPlease try again later.", parse_mode=ParseMode.HTML)
+            return ConversationHandler.END
+            
+    except ValueError:
+        await update.message.reply_text("⚠️ <b>Invalid format</b>\n\nPlease enter a valid percentage (e.g. 5 or 5%).", parse_mode=ParseMode.HTML)
+        return SETTING_RATE
