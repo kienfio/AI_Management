@@ -709,17 +709,17 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
         context.user_data.clear()
         
         keyboard = [
-            [InlineKeyboardButton("Create Agent", callback_data="setting_create_agent")],
-            [InlineKeyboardButton("Create Supplier", callback_data="setting_create_supplier")],
-            [InlineKeyboardButton("Create Worker", callback_data="setting_create_worker")],
-            [InlineKeyboardButton("Create Person in Charge", callback_data="setting_create_pic")],
-            [InlineKeyboardButton("🔙 返回主菜单", callback_data="back_main")]
+            [InlineKeyboardButton("👨‍💼  Create Agent", callback_data="setting_create_agent")],
+            [InlineKeyboardButton("🏭  Create Supplier", callback_data="setting_create_supplier")],
+            [InlineKeyboardButton("👷  Create Worker", callback_data="setting_create_worker")],
+            [InlineKeyboardButton("👑  Create Person in Charge", callback_data="setting_create_pic")],
+            [InlineKeyboardButton("🔙  Back to Main Menu", callback_data="back_main")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
-            "⚙️ *系统设置*\n\n请选择要创建的类型：",
-            parse_mode=ParseMode.MARKDOWN,
+            "⚙️ <b>SYSTEM SETTINGS</b>\n\n<b>Please select what to create:</b>",
+            parse_mode=ParseMode.HTML,
             reply_markup=reply_markup
         )
         return SETTING_CATEGORY
@@ -974,17 +974,17 @@ async def setting_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     context.user_data.clear()
     
     keyboard = [
-        [InlineKeyboardButton("👨‍💼 Create Agent", callback_data="setting_create_agent")],
-        [InlineKeyboardButton("🏭 Create Supplier", callback_data="setting_create_supplier")],
-        [InlineKeyboardButton("👷 Create Worker", callback_data="setting_create_worker")],
-        [InlineKeyboardButton("👑 Create Person in Charge", callback_data="setting_create_pic")],
-        [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="back_main")]
+        [InlineKeyboardButton("👨‍💼  Create Agent", callback_data="setting_create_agent")],
+        [InlineKeyboardButton("🏭  Create Supplier", callback_data="setting_create_supplier")],
+        [InlineKeyboardButton("👷  Create Worker", callback_data="setting_create_worker")],
+        [InlineKeyboardButton("👑  Create Person in Charge", callback_data="setting_create_pic")],
+        [InlineKeyboardButton("🔙  Back to Main Menu", callback_data="back_main")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
-        "⚙️ *System Settings*\n\n*Please select what to create:*",
-        parse_mode=ParseMode.MARKDOWN,
+        "⚙️ <b>SYSTEM SETTINGS</b>\n\n<b>Please select what to create:</b>",
+        parse_mode=ParseMode.HTML,
         reply_markup=reply_markup
     )
     return SETTING_CATEGORY
@@ -1018,8 +1018,8 @@ async def setting_category_handler(update: Update, context: ContextTypes.DEFAULT
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
-        f"{category_emoji} *Create {category_name}*\n\n*Please enter a name:*",
-        parse_mode=ParseMode.MARKDOWN,
+        f"{category_emoji} <b>Create {category_name}</b>\n\n<b>Please enter a name:</b>",
+        parse_mode=ParseMode.HTML,
         reply_markup=reply_markup
     )
     return SETTING_NAME
