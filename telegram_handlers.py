@@ -286,15 +286,10 @@ async def sales_client_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         # 创建代理商选择按钮
         keyboard = []
         for agent in agents:
-            # 使用姓名作为按钮文本 - 更新为英文字段名
+            # 使用姓名作为按钮文本 - 只显示名称
             name = agent.get('Name', '')
-            commission = agent.get('Commission Rate', '')
-            display_text = f"{name}"
-            if commission:
-                display_text += f" ({commission})"
-                
             if name:
-                keyboard.append([InlineKeyboardButton(f"🤝 {display_text}", callback_data=f"agent_{name}_{commission}")])
+                keyboard.append([InlineKeyboardButton(f"🤝 {name}", callback_data=f"agent_{name}_")])
         
         # 添加取消按钮
         keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="back_main")])
@@ -455,15 +450,10 @@ async def show_agent_selection(update: Update, context: ContextTypes.DEFAULT_TYP
         # 创建代理商选择按钮
         keyboard = []
         for agent in agents:
-            # 使用姓名作为按钮文本 - 更新为英文字段名
+            # 使用姓名作为按钮文本 - 只显示名称，不再显示佣金率
             name = agent.get('Name', '')
-            commission = agent.get('Commission Rate', '')
-            display_text = f"{name}"
-            if commission:
-                display_text += f" ({commission})"
-                
             if name:
-                keyboard.append([InlineKeyboardButton(f"🤝 {display_text}", callback_data=f"agent_{name}_{commission}")])
+                keyboard.append([InlineKeyboardButton(f"🤝 {name}", callback_data=f"agent_{name}_")])
         
         # 添加取消按钮
         keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="back_main")])
@@ -1871,11 +1861,11 @@ async def setting_ic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     try:
         sheets_manager = SheetsManager()
         
-        # 添加代理商，包含IC号码
+        # 添加代理商，只包含Name、IC和Phone三个字段
         agent_data = {
             'name': name,
-            'ic': ic,
-            'status': 'Active'  # 修改为英文状态
+            'ic': ic,     # 使用ic字段
+            'phone': ''   # 添加空的phone字段
         }
         
         sheets_manager.add_agent(agent_data)
@@ -2138,84 +2128,54 @@ async def cost_list_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
 
 async def setting_rate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理佣金比例输入"""
+    """处理佣金比例输入 - 由于不再需要存储佣金率，我们直接结束会话"""
     rate_text = update.message.text.strip()
     
     try:
         # 处理百分比格式，如果有百分号则去掉
         rate_text = rate_text.replace('%', '')
         rate = float(rate_text) / 100  # 转换为小数
-        context.user_data['setting_rate'] = rate
         
         # 获取之前保存的数据
         category = context.user_data.get('setting_category')
         name = context.user_data.get('setting_name')
         ic = context.user_data.get('setting_ic', '')
-        type_value = context.user_data.get('setting_type', '')
         
-        # 保存到Google Sheets
-        try:
-            sheets_manager = SheetsManager()
+        # 显示成功消息，但不再保存佣金率
+        category_names = {
+            "agent": "Agent",
+            "supplier": "Supplier",
+            "worker": "Worker",
+            "pic": "Person in Charge"
+        }
+        
+        category_emojis = {
+            "agent": "👨‍💼",
+            "supplier": "🏭",
+            "worker": "👷",
+            "pic": "👑"
+        }
+        
+        emoji = category_emojis.get(category, "➕")
+        category_name = category_names.get(category, "Item")
+        
+        success_message = f"{emoji} <b>Note: Commission rate is no longer stored in the system.</b>\n\n"
+        success_message += f"<b>Name:</b> {name}\n"
+        success_message += f"<b>IC:</b> {ic}\n"
+        success_message += f"<b>Commission Rate:</b> {rate*100:.1f}% (for reference only)\n"
+        
+        keyboard = [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="back_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_html(
+            success_message,
+            reply_markup=reply_markup
+        )
+        
+        # 清除用户数据
+        context.user_data.clear()
+        return ConversationHandler.END
             
-            if category == "agent":
-                data = {
-                    'name': name,
-                    'contact': ic,
-                    'phone': '',
-                    'email': '',
-                    'commission_rate': rate,
-                    'status': 'Active'  # 修改为英文状态
-                }
-                sheets_manager.add_agent(data)
-            
-            # 显示成功消息
-            category_names = {
-                "agent": "Agent",
-                "supplier": "Supplier",
-                "worker": "Worker",
-                "pic": "Person in Charge"
-            }
-            
-            category_emojis = {
-                "agent": "👨‍💼",
-                "supplier": "🏭",
-                "worker": "👷",
-                "pic": "👑"
-            }
-            
-            emoji = category_emojis.get(category, "➕")
-            category_name = category_names.get(category, "Item")
-            
-            success_message = f"{emoji} <b>{category_name} created successfully!</b>\n\n"
-            success_message += f"<b>Name:</b> {name}\n"
-            
-            if ic:
-                success_message += f"<b>IC/Contact:</b> {ic}\n"
-            if type_value:
-                success_message += f"<b>Type:</b> {type_value}\n"
-            if rate:
-                success_message += f"<b>Commission Rate:</b> {rate*100:.1f}%\n"
-            
-            keyboard = [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="back_main")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await update.message.reply_html(
-                success_message,
-                reply_markup=reply_markup
-            )
-            
-            # 清除用户数据
-            context.user_data.clear()
-            return ConversationHandler.END
-            
-        except Exception as e:
-            logger.error(f"添加{category}失败: {e}")
-            await update.message.reply_text(
-                f"❌ 添加 {category_name} 失败，请重试",
-                parse_mode=ParseMode.HTML
-            )
-            return ConversationHandler.END
-    
     except ValueError:
         # 如果输入的不是有效的数字
         await update.message.reply_text(
@@ -2230,23 +2190,11 @@ async def sales_agent_select_handler(update: Update, context: ContextTypes.DEFAU
     
     agent_data = query.data
     if agent_data.startswith("agent_"):
-        # 解析代理商数据 agent_{name}_{commission}
+        # 解析代理商数据 agent_{name}_
         parts = agent_data[6:].split('_')
         if len(parts) >= 1:
             agent_name = parts[0]
             context.user_data['sales_agent'] = agent_name
-            
-            # 获取代理商默认佣金比例（如果有）
-            default_commission = ""
-            if len(parts) >= 2:
-                default_commission = parts[1]
-                # 如果有默认佣金比例，转换为浮点数并存储
-                try:
-                    if default_commission:
-                        default_rate = float(default_commission)
-                        context.user_data['default_commission_rate'] = default_rate
-                except ValueError:
-                    logger.warning(f"无法解析佣金比例: {default_commission}")
             
             # 显示佣金计算方式选择界面
             amount = context.user_data['sales_amount']
@@ -2261,7 +2209,6 @@ async def sales_agent_select_handler(update: Update, context: ContextTypes.DEFAU
             message = f"""
 🤝 <b>Agent:</b> {agent_name}
 💰 <b>Amount:</b> RM{amount:,.2f}
-{f"💵 <b>Default Commission Rate:</b> {default_commission}" if default_commission else ""}
 
 <b>Please select commission calculation method:</b>
 """
