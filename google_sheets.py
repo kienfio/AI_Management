@@ -147,7 +147,8 @@ class GoogleSheetsManager:
             'sales': SHEET_NAMES['sales'],
             'expenses': SHEET_NAMES['expenses'],
             'agents': SHEET_NAMES['agents'],
-            'suppliers': SHEET_NAMES['suppliers']
+            'suppliers': SHEET_NAMES['suppliers'],
+            'pic': SHEET_NAMES['pic']  # 添加负责人管理表为可见表
         }
         
         # 重新创建代理商管理表，以更新表头
@@ -197,6 +198,8 @@ class GoogleSheetsManager:
                                 
                 elif sheet_key == 'suppliers':
                     worksheet.append_row(SUPPLIERS_HEADERS)
+                elif sheet_key == 'pic':
+                    worksheet.append_row(PICS_HEADERS)
                 
                 logger.info(f"✅ 创建工作表: {sheet_name}")
         
@@ -212,10 +215,10 @@ class GoogleSheetsManager:
                     # 继续执行，不中断程序
     
     def get_worksheet(self, sheet_name: str):
-        """获取指定工作表，对于不存在的工作表（workers和pic）使用内存中的数据"""
+        """获取指定工作表，对于不存在的工作表（workers）使用内存中的数据"""
         try:
             # 对于不在Google Sheet中显示的工作表，使用内存中的数据
-            if sheet_name == SHEET_NAMES['workers'] or sheet_name == SHEET_NAMES['pic']:
+            if sheet_name == SHEET_NAMES['workers']:  # 只有workers表使用内存数据
                 # 检查是否已经有内存中的数据
                 if not hasattr(self, '_memory_worksheets'):
                     self._memory_worksheets = {}
@@ -226,10 +229,7 @@ class GoogleSheetsManager:
                     MemoryWorksheet = namedtuple('MemoryWorksheet', ['title', 'data', 'headers'])
                     
                     # 设置对应的表头
-                    if sheet_name == SHEET_NAMES['workers']:
-                        headers = WORKERS_HEADERS
-                    else:  # pic
-                        headers = PICS_HEADERS
+                    headers = WORKERS_HEADERS
                     
                     # 创建内存工作表
                     self._memory_worksheets[sheet_name] = MemoryWorksheet(
@@ -668,12 +668,60 @@ class GoogleSheetsManager:
             logger.error(f"❌ 更新代理商管理表失败: {e}")
             return False
 
+    def update_pic_worksheet(self):
+        """手动更新负责人管理表，确保它存在并有正确的表头"""
+        try:
+            # 检查表是否存在
+            existing_sheets = [ws.title for ws in self.spreadsheet.worksheets()]
+            if SHEET_NAMES['pic'] not in existing_sheets:
+                # 创建新表
+                worksheet = self.spreadsheet.add_worksheet(
+                    title=SHEET_NAMES['pic'], rows=1000, cols=20
+                )
+                worksheet.append_row(PICS_HEADERS)
+                logger.info(f"✅ 创建负责人管理表: {SHEET_NAMES['pic']}")
+            else:
+                # 表已存在，确保表头正确
+                worksheet = self.spreadsheet.worksheet(SHEET_NAMES['pic'])
+                # 获取第一行
+                first_row = worksheet.row_values(1)
+                if first_row != PICS_HEADERS:
+                    # 备份数据
+                    pic_data = worksheet.get_all_records()
+                    # 删除旧表
+                    self.spreadsheet.del_worksheet(worksheet)
+                    # 创建新表
+                    new_worksheet = self.spreadsheet.add_worksheet(
+                        title=SHEET_NAMES['pic'], rows=1000, cols=20
+                    )
+                    new_worksheet.append_row(PICS_HEADERS)
+                    # 恢复数据
+                    for pic in pic_data:
+                        try:
+                            row_data = [
+                                pic.get('Name', ''),
+                                pic.get('Contact', ''),
+                                pic.get('Phone', ''),
+                                pic.get('Department', ''),
+                                pic.get('Status', 'Active')
+                            ]
+                            new_worksheet.append_row(row_data)
+                        except Exception as e:
+                            logger.error(f"❌ 恢复负责人数据失败: {e}")
+                    logger.info(f"✅ 更新负责人管理表: {SHEET_NAMES['pic']}")
+            
+            return True
+        except Exception as e:
+            logger.error(f"❌ 更新负责人管理表失败: {e}")
+            return False
+
 # 创建全局实例
 sheets_manager = GoogleSheetsManager()
 
-# 立即更新代理商管理表结构
+# 立即更新代理商管理表和负责人管理表结构
 try:
     sheets_manager.update_agents_worksheet()
-    logger.info("✅ 已执行代理商管理表结构更新")
+    sheets_manager.update_pic_worksheet()
+    logger.info("✅ 已执行表结构更新")
 except Exception as e:
-    logger.error(f"❌ 执行代理商管理表结构更新失败: {e}")
+    logger.error(f"❌ 执行表结构更新失败: {e}")
