@@ -8,13 +8,10 @@ Google Sheets API 集成 - 优化版本
 import logging
 import json
 import os
-import tempfile
 from datetime import datetime
 from typing import List, Dict, Optional, Any
 import gspread
 from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +40,6 @@ class GoogleSheetsManager:
         self.spreadsheet = None
         self.spreadsheet_id = None
         self.folder_id = None
-        self.drive_service = None
         self._initialize_client()
     
     def _get_credentials(self) -> Credentials:
@@ -136,9 +132,6 @@ class GoogleSheetsManager:
             
             # 创建客户端
             self.client = gspread.authorize(creds)
-            
-            # 创建Drive服务
-            self.drive_service = build('drive', 'v3', credentials=creds)
             
             # 尝试打开表格
             try:
@@ -475,86 +468,6 @@ class GoogleSheetsManager:
         except Exception as e:
             logger.error(f"❌ 生成月度报表失败: {e}")
             return {}
-
-    def upload_to_drive(self, file_path: str, file_name: Optional[str] = None) -> Optional[str]:
-        """
-        上传文件到 Google Drive，并返回文件链接
-        
-        Args:
-            file_path: 本地文件路径
-            file_name: 上传后的文件名称，如果不提供则使用原文件名
-        
-        Returns:
-            文件链接 URL 或 None（如果上传失败）
-        """
-        try:
-            if not self.drive_service:
-                logger.error("❌ Google Drive 服务未初始化")
-                return None
-                
-            if not file_name:
-                file_name = os.path.basename(file_path)
-                
-            # 定义文件元数据
-            file_metadata = {
-                'name': file_name,
-            }
-            
-            # 如果指定了文件夹ID，则放入该文件夹
-            if self.folder_id:
-                file_metadata['parents'] = [self.folder_id]
-                
-            # 上传文件
-            media = MediaFileUpload(file_path, resumable=True)
-            file = self.drive_service.files().create(
-                body=file_metadata,
-                media_body=media,
-                fields='id,webViewLink'
-            ).execute()
-            
-            logger.info(f"✅ 文件上传成功: {file.get('webViewLink')}")
-            
-            # 设置文件权限为"任何人可查看"
-            self.drive_service.permissions().create(
-                fileId=file.get('id'),
-                body={'type': 'anyone', 'role': 'reader'},
-                fields='id'
-            ).execute()
-            
-            return file.get('webViewLink')
-            
-        except Exception as e:
-            logger.error(f"❌ 上传文件到 Google Drive 失败: {e}")
-            return None
-            
-    def upload_telegram_file(self, file_obj, file_name: str) -> Optional[str]:
-        """
-        上传 Telegram 文件到 Google Drive
-        
-        Args:
-            file_obj: Telegram 文件对象
-            file_name: 文件名称
-            
-        Returns:
-            文件链接 URL 或 None（如果上传失败）
-        """
-        try:
-            # 创建临时文件
-            with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-                temp_path = temp_file.name
-                # 写入 Telegram 文件内容
-                file_obj.download(temp_path)
-                
-                # 上传到 Google Drive
-                return self.upload_to_drive(temp_path, file_name)
-                
-        except Exception as e:
-            logger.error(f"❌ 上传 Telegram 文件失败: {e}")
-            return None
-        finally:
-            # 删除临时文件
-            if 'temp_path' in locals() and os.path.exists(temp_path):
-                os.unlink(temp_path)
 
 # 不要在导入时自动创建实例
 # sheets_manager = GoogleSheetsManager()
