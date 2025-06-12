@@ -22,12 +22,12 @@ SHEET_NAMES = {
     'pic': '负责人管理'
 }
 
-SALES_HEADERS = ['日期', '销售人员', '发票金额', '客户类型', '佣金比例', '佣金金额', '备注']
-EXPENSES_HEADERS = ['日期', '费用类型', '供应商', '金额', '类别', '备注']
-AGENTS_HEADERS = ['姓名', '联系人', '电话', '邮箱', '佣金比例', '状态']
-SUPPLIERS_HEADERS = ['供应商名称', '联系人', '电话', '邮箱', '产品/服务', '状态']
-WORKERS_HEADERS = ['姓名', '联系人', '电话', '职位', '状态']
-PICS_HEADERS = ['姓名', '联系人', '电话', '部门', '状态']
+SALES_HEADERS = ['Date', 'Personal in charge', 'Invoice Amount', 'Client Type', 'Commission Rate', 'Commission Amount', 'Notes']
+EXPENSES_HEADERS = ['Date', 'Expense Type', 'Supplier', 'Amount', 'Category', 'Description']
+AGENTS_HEADERS = ['Name', 'Contact', 'Phone', 'Email', 'Commission Rate', 'Status']
+SUPPLIERS_HEADERS = ['Supplier Name', 'Contact', 'Phone', 'Email', 'Product/Service', 'Status']
+WORKERS_HEADERS = ['Name', 'Contact', 'Phone', 'Position', 'Status']
+PICS_HEADERS = ['Name', 'Contact', 'Phone', 'Department', 'Status']
 
 logger = logging.getLogger(__name__)
 
@@ -216,7 +216,7 @@ class GoogleSheetsManager:
             if month:
                 filtered_records = []
                 for record in records:
-                    if record.get('日期', '').startswith(month):
+                    if record.get('Date', '').startswith(month):
                         filtered_records.append(record)
                 return filtered_records
             
@@ -237,19 +237,36 @@ class GoogleSheetsManager:
             if not worksheet:
                 return False
             
+            # 准备数据行
             row_data = [
                 data.get('date', datetime.now().strftime('%Y-%m-%d')),
-                data.get('expense_type', ''),
+                data.get('type', ''),
                 data.get('supplier', ''),
                 data.get('amount', 0),
                 data.get('category', ''),
-                data.get('notes', '')
+                data.get('description', '')
             ]
             
             worksheet.append_row(row_data)
             logger.info(f"✅ 费用记录添加成功: {data.get('amount')}")
             return True
-            
+        except Exception as e:
+            logger.error(f"❌ 添加费用记录失败: {e}")
+            return False
+    
+    def add_expense(self, date_str: str, expense_type: str, amount: float, supplier: str = "", 
+                    description: str = "", receipt: str = "") -> bool:
+        """添加费用记录（简化版）"""
+        try:
+            data = {
+                'date': date_str,
+                'type': expense_type,
+                'supplier': supplier,
+                'amount': amount,
+                'category': supplier if supplier else 'Other',
+                'description': description
+            }
+            return self.add_expense_record(data)
         except Exception as e:
             logger.error(f"❌ 添加费用记录失败: {e}")
             return False
@@ -266,7 +283,7 @@ class GoogleSheetsManager:
             if month:
                 filtered_records = []
                 for record in records:
-                    if record.get('日期', '').startswith(month):
+                    if record.get('Date', '').startswith(month):
                         filtered_records.append(record)
                 return filtered_records
             
@@ -314,7 +331,7 @@ class GoogleSheetsManager:
             records = worksheet.get_all_records()
             
             if active_only:
-                return [r for r in records if r.get('状态') == '激活']
+                return [r for r in records if r.get('Status') == '激活']
             
             return records
             
@@ -360,7 +377,7 @@ class GoogleSheetsManager:
             records = worksheet.get_all_records()
             
             if active_only:
-                return [r for r in records if r.get('状态') == '激活']
+                return [r for r in records if r.get('Status') == '激活']
             
             return records
             
@@ -405,7 +422,7 @@ class GoogleSheetsManager:
             records = worksheet.get_all_records()
             
             if active_only:
-                return [r for r in records if r.get('状态') == '激活']
+                return [r for r in records if r.get('Status') == '激活']
             
             return records
             
@@ -450,7 +467,7 @@ class GoogleSheetsManager:
             records = worksheet.get_all_records()
             
             if active_only:
-                return [r for r in records if r.get('状态') == '激活']
+                return [r for r in records if r.get('Status') == '激活']
             
             return records
             
@@ -470,17 +487,17 @@ class GoogleSheetsManager:
             expense_records = self.get_expense_records(month)
             
             # 计算销售总额和佣金
-            total_sales = sum(float(r.get('发票金额', 0)) for r in sales_records)
-            total_commission = sum(float(r.get('佣金金额', 0)) for r in sales_records)
+            total_sales = sum(float(r.get('Invoice Amount', 0)) for r in sales_records)
+            total_commission = sum(float(r.get('Commission Amount', 0)) for r in sales_records)
             
             # 计算费用总额
-            total_expenses = sum(float(r.get('金额', 0)) for r in expense_records)
+            total_expenses = sum(float(r.get('Amount', 0)) for r in expense_records)
             
             # 按类型统计费用
             expense_by_type = {}
             for record in expense_records:
-                expense_type = record.get('费用类型', '其他')
-                amount = float(record.get('金额', 0))
+                expense_type = record.get('Expense Type', '其他')
+                amount = float(record.get('Amount', 0))
                 expense_by_type[expense_type] = expense_by_type.get(expense_type, 0) + amount
             
             # 计算净利润
