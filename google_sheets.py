@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Google Sheets API 集成
-数据存储和同步功能
+Google Sheets API 集成 - 增强版
+数据存储和同步功能，带美化和格式化
 """
 
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List, Dict, Optional, Any
 import gspread
 import json
 from google.oauth2.service_account import Credentials
+from gspread.utils import rowcol_to_a1
+
 # 直接导入常量，避免循环导入
 SHEET_NAMES = {
     'sales': '销售记录',
@@ -22,26 +24,33 @@ SHEET_NAMES = {
     'pic': '负责人管理'
 }
 
-SALES_HEADERS = ['Date', 'Personal in charge', 'Invoice Amount', 'Client Type', 'Commission Rate', 'Commission Amount', 'Notes']
-EXPENSES_HEADERS = ['Date', 'Expense Type', 'Supplier', 'Amount', 'Category', 'Description']
-AGENTS_HEADERS = ['Name', 'IC', 'Phone']
-SUPPLIERS_HEADERS = ['Supplier Name', 'Contact', 'Phone', 'Email', 'Product/Service', 'Status']
-WORKERS_HEADERS = ['Name', 'Contact', 'Phone', 'Position', 'Status']
-PICS_HEADERS = ['Name', 'Contact', 'Phone', 'Department', 'Status']
+SALES_HEADERS = ['日期', '销售人员', '发票金额', '客户类型', '佣金比例', '佣金金额', '备注']
+EXPENSES_HEADERS = ['日期', '费用类型', '供应商', '金额', '类别', '备注']
+AGENTS_HEADERS = ['姓名', '联系人', '电话', '邮箱', '佣金比例', '状态']
+SUPPLIERS_HEADERS = ['供应商名称', '联系人', '电话', '邮箱', '产品/服务', '状态']
+WORKERS_HEADERS = ['姓名', '联系人', '电话', '职位', '状态']
+PICS_HEADERS = ['姓名', '联系人', '电话', '部门', '状态']
+
+# 颜色配置
+COLORS = {
+    'header_bg': {'red': 0.2, 'green': 0.4, 'blue': 0.8},  # 蓝色表头
+    'header_text': {'red': 1.0, 'green': 1.0, 'blue': 1.0},  # 白色文字
+    'active_status': {'red': 0.8, 'green': 0.9, 'blue': 0.8},  # 浅绿色
+    'inactive_status': {'red': 0.9, 'green': 0.8, 'blue': 0.8},  # 浅红色
+    'amount_positive': {'red': 0.9, 'green': 1.0, 'blue': 0.9},  # 浅绿色背景
+    'amount_negative': {'red': 1.0, 'green': 0.9, 'blue': 0.9},  # 浅红色背景
+    'zebra_even': {'red': 0.95, 'green': 0.95, 'blue': 0.95},  # 浅灰色斑马纹
+}
 
 logger = logging.getLogger(__name__)
 
 class GoogleSheetsManager:
-    """Google Sheets 管理器"""
+    """Google Sheets 管理器 - 增强版"""
     
     def __init__(self):
-        """初始化 Google Sheets 管理器"""
         self.client = None
         self.spreadsheet = None
         self.spreadsheet_id = None
-        self.drive_service = None
-        self._cache = {}  # 添加缓存字典
-        self._cache_expiry = {}  # 缓存过期时间
         self._initialize_client()
     
     def _get_credentials(self) -> Credentials:
@@ -142,141 +151,328 @@ class GoogleSheetsManager:
             logger.error(f"❌ Google Sheets 初始化失败: {e}")
             raise
     
+    def _format_header(self, worksheet, headers: List[str], row: int = 1):
+        """格式化表头"""
+        try:
+            # 设置表头样式
+            header_range = f"A{row}:{chr(ord('A') + len(headers) - 1)}{row}"
+            
+            # 表头格式
+            header_format = {
+                "backgroundColor": COLORS['header_bg'],
+                "textFormat": {
+                    "foregroundColor": COLORS['header_text'],
+                    "fontSize": 11,
+                    "bold": True
+                },
+                "horizontalAlignment": "CENTER",
+                "verticalAlignment": "MIDDLE"
+            }
+            
+            # 应用格式
+            worksheet.format(header_range, header_format)
+            
+            # 设置行高
+            worksheet.set_row_height(row, 35)
+            
+            # 冻结表头行
+            worksheet.freeze(rows=1)
+            
+            logger.info(f"✅ 表头格式化完成: {header_range}")
+            
+        except Exception as e:
+            logger.error(f"❌ 表头格式化失败: {e}")
+    
+    def _format_data_columns(self, worksheet, sheet_type: str):
+        """格式化数据列"""
+        try:
+            # 根据工作表类型设置列格式
+            if sheet_type in ['sales', 'expenses']:
+                # 金额列格式化为货币
+                amount_cols = []
+                if sheet_type == 'sales':
+                    amount_cols = ['C', 'E', 'F']  # 发票金额, 佣金比例, 佣金金额
+                elif sheet_type == 'expenses':
+                    amount_cols = ['D']  # 金额
+                
+                for col in amount_cols:
+                    # 设置数字格式
+                    worksheet.format(f"{col}2:{col}1000", {
+                        "numberFormat": {
+                            "type": "CURRENCY",
+                            "pattern": "¥#,##0.00"
+                        },
+                        "horizontalAlignment": "RIGHT"
+                    })
+            
+            # 日期列格式化
+            if sheet_type in ['sales', 'expenses']:
+                worksheet.format("A2:A1000", {
+                    "numberFormat": {
+                        "type": "DATE",
+                        "pattern": "yyyy-mm-dd"
+                    },
+                    "horizontalAlignment": "CENTER"
+                })
+            
+            # 状态列格式化（条件格式）
+            if sheet_type in ['agents', 'suppliers', 'workers', 'pic']:
+                status_col = 'F'  # 状态列
+                
+                # 激活状态 - 绿色背景
+                worksheet.format(f"{status_col}2:{status_col}1000", {
+                    "conditionalFormatRules": [{
+                        "ranges": [{"sheetId": worksheet.id, "startColumnIndex": 5, "endColumnIndex": 6}],
+                        "booleanRule": {
+                            "condition": {
+                                "type": "TEXT_EQ",
+                                "values": [{"userEnteredValue": "激活"}]
+                            },
+                            "format": {
+                                "backgroundColor": COLORS['active_status']
+                            }
+                        }
+                    }]
+                })
+            
+            logger.info(f"✅ 数据列格式化完成: {sheet_type}")
+            
+        except Exception as e:
+            logger.error(f"❌ 数据列格式化失败: {e}")
+    
+    def _add_zebra_stripes(self, worksheet):
+        """添加斑马纹（隔行变色）"""
+        try:
+            # 设置隔行变色
+            worksheet.format("A2:Z1000", {
+                "conditionalFormatRules": [{
+                    "ranges": [{"sheetId": worksheet.id}],
+                    "booleanRule": {
+                        "condition": {
+                            "type": "CUSTOM_FORMULA",
+                            "values": [{"userEnteredValue": "=ISEVEN(ROW())"}]
+                        },
+                        "format": {
+                            "backgroundColor": COLORS['zebra_even']
+                        }
+                    }
+                }]
+            })
+            
+            logger.info("✅ 斑马纹格式添加完成")
+            
+        except Exception as e:
+            logger.error(f"❌ 斑马纹格式添加失败: {e}")
+    
+    def _set_column_widths(self, worksheet, sheet_type: str):
+        """设置列宽"""
+        try:
+            width_configs = {
+                'sales': [120, 120, 100, 100, 80, 100, 200],  # 日期, 销售人员, 发票金额等
+                'expenses': [120, 120, 120, 100, 100, 200],   # 日期, 费用类型等
+                'agents': [100, 120, 120, 180, 80, 80],       # 姓名, 联系人等
+                'suppliers': [150, 120, 120, 180, 150, 80],   # 供应商名称等
+                'workers': [100, 120, 120, 100, 80],          # 姓名, 联系人等
+                'pic': [100, 120, 120, 100, 80]               # 姓名, 联系人等
+            }
+            
+            if sheet_type in width_configs:
+                widths = width_configs[sheet_type]
+                for i, width in enumerate(widths):
+                    worksheet.columns_auto_resize(i, i + 1)
+                    # 设置最小宽度
+                    col_letter = chr(ord('A') + i)
+                    worksheet.update_dimension_property(
+                        'COLUMNS', 
+                        col_letter, 
+                        'pixelSize', 
+                        width
+                    )
+            
+            logger.info(f"✅ 列宽设置完成: {sheet_type}")
+            
+        except Exception as e:
+            logger.error(f"❌ 列宽设置失败: {e}")
+    
+    def _add_data_validation(self, worksheet, sheet_type: str):
+        """添加数据验证"""
+        try:
+            if sheet_type == 'sales':
+                # 客户类型下拉选择
+                worksheet.data_validation('D2:D1000', {
+                    'condition': {
+                        'type': 'ONE_OF_LIST',
+                        'values': [
+                            {'userEnteredValue': '个人客户'},
+                            {'userEnteredValue': '企业客户'},
+                            {'userEnteredValue': 'VIP客户'},
+                            {'userEnteredValue': '新客户'}
+                        ]
+                    },
+                    'showCustomUi': True,
+                    'strict': False
+                })
+            
+            elif sheet_type == 'expenses':
+                # 费用类型下拉选择
+                worksheet.data_validation('B2:B1000', {
+                    'condition': {
+                        'type': 'ONE_OF_LIST',
+                        'values': [
+                            {'userEnteredValue': '办公用品'},
+                            {'userEnteredValue': '差旅费'},
+                            {'userEnteredValue': '招待费'},
+                            {'userEnteredValue': '营销费用'},
+                            {'userEnteredValue': '其他'}
+                        ]
+                    },
+                    'showCustomUi': True,
+                    'strict': False
+                })
+                
+                # 类别下拉选择
+                worksheet.data_validation('E2:E1000', {
+                    'condition': {
+                        'type': 'ONE_OF_LIST',
+                        'values': [
+                            {'userEnteredValue': '固定成本'},
+                            {'userEnteredValue': '变动成本'},
+                            {'userEnteredValue': '管理费用'},
+                            {'userEnteredValue': '销售费用'}
+                        ]
+                    },
+                    'showCustomUi': True,
+                    'strict': False
+                })
+            
+            # 状态列验证（适用于人员管理表）
+            if sheet_type in ['agents', 'suppliers', 'workers', 'pic']:
+                status_col_range = f"F2:F1000"
+                worksheet.data_validation(status_col_range, {
+                    'condition': {
+                        'type': 'ONE_OF_LIST',
+                        'values': [
+                            {'userEnteredValue': '激活'},
+                            {'userEnteredValue': '停用'}
+                        ]
+                    },
+                    'showCustomUi': True,
+                    'strict': True
+                })
+            
+            logger.info(f"✅ 数据验证添加完成: {sheet_type}")
+            
+        except Exception as e:
+            logger.error(f"❌ 数据验证添加失败: {e}")
+    
     def _ensure_worksheets_exist(self):
-        """确保所有必需的工作表存在"""
+        """确保所有必需的工作表存在并格式化"""
         existing_sheets = [ws.title for ws in self.spreadsheet.worksheets()]
         
-        # 定义要在Google Sheet中显示的工作表
-        visible_sheets = {
-            'sales': SHEET_NAMES['sales'],
-            'expenses': SHEET_NAMES['expenses'],
-            'agents': SHEET_NAMES['agents'],
-            'suppliers': SHEET_NAMES['suppliers'],
-            'pic': SHEET_NAMES['pic']  # 添加负责人管理表为可见表
-        }
-        
-        # 重新创建代理商管理表，以更新表头
-        if SHEET_NAMES['agents'] in existing_sheets:
-            try:
-                # 先备份现有数据
-                agents_ws = self.spreadsheet.worksheet(SHEET_NAMES['agents'])
-                agents_data = agents_ws.get_all_records()
-                
-                # 删除旧表
-                self.spreadsheet.del_worksheet(agents_ws)
-                logger.info(f"✅ 删除旧的代理商管理表: {SHEET_NAMES['agents']}")
-                
-                # 从existing_sheets中移除，以便后续创建新表
-                existing_sheets.remove(SHEET_NAMES['agents'])
-            except Exception as e:
-                logger.error(f"❌ 删除代理商管理表失败: {e}")
-        
-        # 创建缺失的工作表（只创建可见的工作表）
-        for sheet_key, sheet_name in visible_sheets.items():
+        # 创建缺失的工作表
+        for sheet_key, sheet_name in SHEET_NAMES.items():
             if sheet_name not in existing_sheets:
                 worksheet = self.spreadsheet.add_worksheet(
                     title=sheet_name, rows=1000, cols=20
                 )
                 
                 # 添加表头
+                headers = []
                 if sheet_key == 'sales':
-                    worksheet.append_row(SALES_HEADERS)
+                    headers = SALES_HEADERS
                 elif sheet_key == 'expenses':
-                    worksheet.append_row(EXPENSES_HEADERS)
+                    headers = EXPENSES_HEADERS
                 elif sheet_key == 'agents':
-                    worksheet.append_row(AGENTS_HEADERS)
-                    
-                    # 如果有备份数据，恢复数据（只保留Name、IC和Phone三列）
-                    if 'agents_data' in locals():
-                        for agent in agents_data:
-                            try:
-                                # 只添加需要的三列数据
-                                row_data = [
-                                    agent.get('Name', ''),
-                                    agent.get('IC', ''),  # 使用IC字段
-                                    agent.get('Phone', '')
-                                ]
-                                worksheet.append_row(row_data)
-                            except Exception as e:
-                                logger.error(f"❌ 恢复代理商数据失败: {e}")
-                                
+                    headers = AGENTS_HEADERS
                 elif sheet_key == 'suppliers':
-                    worksheet.append_row(SUPPLIERS_HEADERS)
+                    headers = SUPPLIERS_HEADERS
+                elif sheet_key == 'workers':
+                    headers = WORKERS_HEADERS
                 elif sheet_key == 'pic':
-                    worksheet.append_row(PICS_HEADERS)
+                    headers = PICS_HEADERS
                 
-                logger.info(f"✅ 创建工作表: {sheet_name}")
-        
-        # 移除不需要显示的工作表（如果存在）
-        for sheet_key, sheet_name in SHEET_NAMES.items():
-            if sheet_key not in visible_sheets and sheet_name in existing_sheets:
-                try:
-                    worksheet = self.spreadsheet.worksheet(sheet_name)
-                    self.spreadsheet.del_worksheet(worksheet)
-                    logger.info(f"✅ 移除工作表: {sheet_name}")
-                except Exception as e:
-                    logger.error(f"❌ 移除工作表失败 {sheet_name}: {e}")
-                    # 继续执行，不中断程序
+                if headers:
+                    worksheet.append_row(headers)
+                    
+                    # 应用格式化
+                    self._format_header(worksheet, headers)
+                    self._format_data_columns(worksheet, sheet_key)
+                    self._add_zebra_stripes(worksheet)
+                    self._set_column_widths(worksheet, sheet_key)
+                    self._add_data_validation(worksheet, sheet_key)
+                
+                logger.info(f"✅ 创建并格式化工作表: {sheet_name}")
+            else:
+                # 如果工作表已存在，确保格式正确
+                worksheet = self.spreadsheet.worksheet(sheet_name)
+                headers = []
+                
+                if sheet_key == 'sales':
+                    headers = SALES_HEADERS
+                elif sheet_key == 'expenses':
+                    headers = EXPENSES_HEADERS
+                elif sheet_key == 'agents':
+                    headers = AGENTS_HEADERS
+                elif sheet_key == 'suppliers':
+                    headers = SUPPLIERS_HEADERS
+                elif sheet_key == 'workers':
+                    headers = WORKERS_HEADERS
+                elif sheet_key == 'pic':
+                    headers = PICS_HEADERS
+                
+                if headers:
+                    # 检查是否需要更新格式
+                    try:
+                        self._format_header(worksheet, headers)
+                        self._format_data_columns(worksheet, sheet_key)
+                        self._add_data_validation(worksheet, sheet_key)
+                        logger.info(f"✅ 更新工作表格式: {sheet_name}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ 更新工作表格式失败 {sheet_name}: {e}")
     
     def get_worksheet(self, sheet_name: str):
-        """获取指定工作表，对于不存在的工作表（workers）使用内存中的数据"""
+        """获取指定工作表"""
         try:
-            # 对于不在Google Sheet中显示的工作表，使用内存中的数据
-            if sheet_name == SHEET_NAMES['workers']:  # 只有workers表使用内存数据
-                # 检查是否已经有内存中的数据
-                if not hasattr(self, '_memory_worksheets'):
-                    self._memory_worksheets = {}
-                
-                if sheet_name not in self._memory_worksheets:
-                    # 创建一个内存中的工作表对象
-                    from collections import namedtuple
-                    MemoryWorksheet = namedtuple('MemoryWorksheet', ['title', 'data', 'headers'])
-                    
-                    # 设置对应的表头
-                    headers = WORKERS_HEADERS
-                    
-                    # 创建内存工作表
-                    self._memory_worksheets[sheet_name] = MemoryWorksheet(
-                        title=sheet_name,
-                        data=[],  # 存储行数据
-                        headers=headers
-                    )
-                    logger.info(f"✅ 创建内存工作表: {sheet_name}")
-                
-                # 返回内存中的工作表对象
-                memory_worksheet = self._memory_worksheets[sheet_name]
-                
-                # 添加必要的方法，使其行为类似于gspread的worksheet
-                class MemoryWorksheetWrapper:
-                    def __init__(self, memory_ws):
-                        self.memory_ws = memory_ws
-                    
-                    def append_row(self, row_data):
-                        self.memory_ws.data.append(row_data)
-                        return True
-                    
-                    def get_all_records(self):
-                        if not self.memory_ws.data:
-                            return []
-                        
-                        records = []
-                        for row in self.memory_ws.data:
-                            record = {}
-                            for i, header in enumerate(self.memory_ws.headers):
-                                if i < len(row):
-                                    record[header] = row[i]
-                                else:
-                                    record[header] = ''
-                            records.append(record)
-                        return records
-                
-                return MemoryWorksheetWrapper(memory_worksheet)
-            
-            # 对于正常的工作表，使用Google Sheet
             return self.spreadsheet.worksheet(sheet_name)
         except Exception as e:
             logger.error(f"❌ 获取工作表失败 {sheet_name}: {e}")
             return None
+    
+    def _format_new_row(self, worksheet, row_num: int, sheet_type: str):
+        """格式化新添加的行"""
+        try:
+            # 基本行格式
+            row_range = f"A{row_num}:Z{row_num}"
+            worksheet.format(row_range, {
+                "verticalAlignment": "MIDDLE",
+                "textFormat": {"fontSize": 10}
+            })
+            
+            # 根据类型设置特定格式
+            if sheet_type in ['sales', 'expenses']:
+                # 日期列居中
+                worksheet.format(f"A{row_num}", {
+                    "horizontalAlignment": "CENTER"
+                })
+                
+                # 金额列右对齐
+                if sheet_type == 'sales':
+                    worksheet.format(f"C{row_num}:F{row_num}", {
+                        "horizontalAlignment": "RIGHT"
+                    })
+                elif sheet_type == 'expenses':
+                    worksheet.format(f"D{row_num}", {
+                        "horizontalAlignment": "RIGHT"
+                    })
+            
+            # 状态列居中（人员管理表）
+            if sheet_type in ['agents', 'suppliers', 'workers', 'pic']:
+                worksheet.format(f"F{row_num}", {
+                    "horizontalAlignment": "CENTER"
+                })
+            
+        except Exception as e:
+            logger.error(f"❌ 行格式化失败: {e}")
     
     # =============================================================================
     # 销售记录操作
@@ -293,14 +489,19 @@ class GoogleSheetsManager:
             row_data = [
                 data.get('date', datetime.now().strftime('%Y-%m-%d')),
                 data.get('person', ''),
-                data.get('amount', 0),
+                float(data.get('amount', 0)),
                 data.get('client_type', ''),
-                data.get('commission_rate', 0),
-                data.get('commission_amount', 0),
+                float(data.get('commission_rate', 0)),
+                float(data.get('commission_amount', 0)),
                 data.get('notes', '')
             ]
             
             worksheet.append_row(row_data)
+            
+            # 格式化新添加的行
+            row_count = len(worksheet.get_all_values())
+            self._format_new_row(worksheet, row_count, 'sales')
+            
             logger.info(f"✅ 销售记录添加成功: {data.get('amount')}")
             return True
             
@@ -321,7 +522,7 @@ class GoogleSheetsManager:
             if month:
                 filtered_records = []
                 for record in records:
-                    if record.get('Date', '').startswith(month):
+                    if record.get('日期', '').startswith(month):
                         filtered_records.append(record)
                 return filtered_records
             
@@ -342,36 +543,24 @@ class GoogleSheetsManager:
             if not worksheet:
                 return False
             
-            # 准备数据行
             row_data = [
                 data.get('date', datetime.now().strftime('%Y-%m-%d')),
-                data.get('type', ''),
+                data.get('expense_type', ''),
                 data.get('supplier', ''),
-                data.get('amount', 0),
+                float(data.get('amount', 0)),
                 data.get('category', ''),
-                data.get('description', '')
+                data.get('notes', '')
             ]
             
             worksheet.append_row(row_data)
+            
+            # 格式化新添加的行
+            row_count = len(worksheet.get_all_values())
+            self._format_new_row(worksheet, row_count, 'expenses')
+            
             logger.info(f"✅ 费用记录添加成功: {data.get('amount')}")
             return True
-        except Exception as e:
-            logger.error(f"❌ 添加费用记录失败: {e}")
-            return False
-    
-    def add_expense(self, date_str: str, expense_type: str, amount: float, supplier: str = "", 
-                    description: str = "", receipt: str = "") -> bool:
-        """添加费用记录（简化版）"""
-        try:
-            data = {
-                'date': date_str,
-                'type': expense_type,
-                'supplier': supplier,
-                'amount': amount,
-                'category': supplier if supplier else 'Other',
-                'description': description
-            }
-            return self.add_expense_record(data)
+            
         except Exception as e:
             logger.error(f"❌ 添加费用记录失败: {e}")
             return False
@@ -388,7 +577,7 @@ class GoogleSheetsManager:
             if month:
                 filtered_records = []
                 for record in records:
-                    if record.get('Date', '').startswith(month):
+                    if record.get('日期', '').startswith(month):
                         filtered_records.append(record)
                 return filtered_records
             
@@ -409,14 +598,21 @@ class GoogleSheetsManager:
             if not worksheet:
                 return False
             
-            # 使用英文字段名，只添加三列数据
             row_data = [
                 data.get('name', ''),
-                data.get('ic', ''),  # 使用ic字段
-                data.get('phone', '')
+                data.get('contact', ''),
+                data.get('phone', ''),
+                data.get('email', ''),
+                float(data.get('commission_rate', 0)),
+                data.get('status', '激活')
             ]
             
             worksheet.append_row(row_data)
+            
+            # 格式化新添加的行
+            row_count = len(worksheet.get_all_values())
+            self._format_new_row(worksheet, row_count, 'agents')
+            
             logger.info(f"✅ 代理商添加成功: {data.get('name')}")
             return True
             
@@ -425,14 +621,7 @@ class GoogleSheetsManager:
             return False
     
     def get_agents(self, active_only: bool = True) -> List[Dict]:
-        """获取代理商列表，使用缓存提高响应速度"""
-        cache_key = f"agents_{active_only}"
-        # 检查缓存是否有效（30分钟内）
-        if cache_key in self._cache and cache_key in self._cache_expiry:
-            if datetime.now() < self._cache_expiry[cache_key]:
-                logger.info(f"✅ 使用缓存的代理商列表")
-                return self._cache[cache_key]
-                
+        """获取代理商列表"""
         try:
             worksheet = self.get_worksheet(SHEET_NAMES['agents'])
             if not worksheet:
@@ -440,68 +629,14 @@ class GoogleSheetsManager:
             
             records = worksheet.get_all_records()
             
-            # 由于不再有Status字段，直接返回所有记录
-            result = records
+            if active_only:
+                return [r for r in records if r.get('状态') == '激活']
             
-            # 更新缓存
-            self._cache[cache_key] = result
-            # 设置缓存过期时间（30分钟）
-            self._cache_expiry[cache_key] = datetime.now() + timedelta(minutes=30)
-            logger.info(f"✅ 已更新代理商列表缓存")
-            
-            return result
+            return records
             
         except Exception as e:
             logger.error(f"❌ 获取代理商列表失败: {e}")
             return []
-            
-    def update_agents_worksheet(self):
-        """手动更新代理商管理表的表头结构"""
-        try:
-            # 检查表是否存在
-            existing_sheets = [ws.title for ws in self.spreadsheet.worksheets()]
-            if SHEET_NAMES['agents'] not in existing_sheets:
-                logger.error(f"❌ 代理商管理表不存在: {SHEET_NAMES['agents']}")
-                return False
-            
-            # 先备份现有数据
-            agents_ws = self.spreadsheet.worksheet(SHEET_NAMES['agents'])
-            agents_data = agents_ws.get_all_records()
-            
-            # 删除旧表
-            self.spreadsheet.del_worksheet(agents_ws)
-            logger.info(f"✅ 删除旧的代理商管理表: {SHEET_NAMES['agents']}")
-            
-            # 创建新表
-            worksheet = self.spreadsheet.add_worksheet(
-                title=SHEET_NAMES['agents'], rows=1000, cols=20
-            )
-            
-            # 添加新表头
-            worksheet.append_row(AGENTS_HEADERS)
-            logger.info(f"✅ 创建新的代理商管理表: {SHEET_NAMES['agents']}")
-            
-            # 恢复数据（只保留Name、IC和Phone三列）
-            for agent in agents_data:
-                try:
-                    # 只添加需要的三列数据
-                    row_data = [
-                        agent.get('Name', ''),
-                        agent.get('IC', ''),  # 使用IC字段
-                        agent.get('Phone', '')
-                    ]
-                    worksheet.append_row(row_data)
-                except Exception as e:
-                    logger.error(f"❌ 恢复代理商数据失败: {e}")
-            
-            # 清除缓存，确保下次获取最新数据
-            self.clear_cache()
-            logger.info(f"✅ 成功更新代理商管理表结构")
-            return True
-            
-        except Exception as e:
-            logger.error(f"❌ 更新代理商管理表失败: {e}")
-            return False
     
     # =============================================================================
     # 供应商管理
@@ -514,17 +649,21 @@ class GoogleSheetsManager:
             if not worksheet:
                 return False
             
-            # 使用英文字段名
             row_data = [
                 data.get('name', ''),
                 data.get('contact', ''),
                 data.get('phone', ''),
                 data.get('email', ''),
                 data.get('products', ''),
-                data.get('status', 'Active')
+                data.get('status', '激活')
             ]
             
             worksheet.append_row(row_data)
+            
+            # 格式化新添加的行
+            row_count = len(worksheet.get_all_values())
+            self._format_new_row(worksheet, row_count, 'suppliers')
+            
             logger.info(f"✅ 供应商添加成功: {data.get('name')}")
             return True
             
@@ -542,7 +681,7 @@ class GoogleSheetsManager:
             records = worksheet.get_all_records()
             
             if active_only:
-                return [r for r in records if r.get('Status') == 'Active']
+                return [r for r in records if r.get('状态') == '激活']
             
             return records
             
