@@ -304,13 +304,14 @@ class GoogleSheetsManager:
             if not worksheet:
                 return False
             
+            # 使用英文字段名
             row_data = [
                 data.get('name', ''),
                 data.get('contact', ''),
                 data.get('phone', ''),
                 data.get('email', ''),
                 data.get('commission_rate', 0),
-                data.get('status', '激活')
+                data.get('status', 'Active')
             ]
             
             worksheet.append_row(row_data)
@@ -350,13 +351,14 @@ class GoogleSheetsManager:
             if not worksheet:
                 return False
             
+            # 使用英文字段名
             row_data = [
                 data.get('name', ''),
                 data.get('contact', ''),
                 data.get('phone', ''),
                 data.get('email', ''),
                 data.get('products', ''),
-                data.get('status', '激活')
+                data.get('status', 'Active')
             ]
             
             worksheet.append_row(row_data)
@@ -396,12 +398,13 @@ class GoogleSheetsManager:
             if not worksheet:
                 return False
             
+            # 使用英文字段名
             row_data = [
                 data.get('name', ''),
                 data.get('contact', ''),
                 data.get('phone', ''),
                 data.get('position', ''),
-                data.get('status', '激活')
+                data.get('status', 'Active')
             ]
             
             worksheet.append_row(row_data)
@@ -441,12 +444,13 @@ class GoogleSheetsManager:
             if not worksheet:
                 return False
             
+            # 使用英文字段名
             row_data = [
                 data.get('name', ''),
                 data.get('contact', ''),
                 data.get('phone', ''),
                 data.get('department', ''),
-                data.get('status', '激活')
+                data.get('status', 'Active')
             ]
             
             worksheet.append_row(row_data)
