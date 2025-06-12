@@ -7,7 +7,7 @@ Google Sheets API 集成
 
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Any
 import gspread
 import json
@@ -35,9 +35,13 @@ class GoogleSheetsManager:
     """Google Sheets 管理器"""
     
     def __init__(self):
+        """初始化 Google Sheets 管理器"""
         self.client = None
         self.spreadsheet = None
         self.spreadsheet_id = None
+        self.drive_service = None
+        self._cache = {}  # 添加缓存字典
+        self._cache_expiry = {}  # 缓存过期时间
         self._initialize_client()
     
     def _get_credentials(self) -> Credentials:
@@ -421,7 +425,14 @@ class GoogleSheetsManager:
             return False
     
     def get_agents(self, active_only: bool = True) -> List[Dict]:
-        """获取代理商列表"""
+        """获取代理商列表，使用缓存提高响应速度"""
+        cache_key = f"agents_{active_only}"
+        # 检查缓存是否有效（30分钟内）
+        if cache_key in self._cache and cache_key in self._cache_expiry:
+            if datetime.now() < self._cache_expiry[cache_key]:
+                logger.info(f"✅ 使用缓存的代理商列表")
+                return self._cache[cache_key]
+                
         try:
             worksheet = self.get_worksheet(SHEET_NAMES['agents'])
             if not worksheet:
@@ -430,11 +441,67 @@ class GoogleSheetsManager:
             records = worksheet.get_all_records()
             
             # 由于不再有Status字段，直接返回所有记录
-            return records
+            result = records
+            
+            # 更新缓存
+            self._cache[cache_key] = result
+            # 设置缓存过期时间（30分钟）
+            self._cache_expiry[cache_key] = datetime.now() + timedelta(minutes=30)
+            logger.info(f"✅ 已更新代理商列表缓存")
+            
+            return result
             
         except Exception as e:
             logger.error(f"❌ 获取代理商列表失败: {e}")
             return []
+            
+    def update_agents_worksheet(self):
+        """手动更新代理商管理表的表头结构"""
+        try:
+            # 检查表是否存在
+            existing_sheets = [ws.title for ws in self.spreadsheet.worksheets()]
+            if SHEET_NAMES['agents'] not in existing_sheets:
+                logger.error(f"❌ 代理商管理表不存在: {SHEET_NAMES['agents']}")
+                return False
+            
+            # 先备份现有数据
+            agents_ws = self.spreadsheet.worksheet(SHEET_NAMES['agents'])
+            agents_data = agents_ws.get_all_records()
+            
+            # 删除旧表
+            self.spreadsheet.del_worksheet(agents_ws)
+            logger.info(f"✅ 删除旧的代理商管理表: {SHEET_NAMES['agents']}")
+            
+            # 创建新表
+            worksheet = self.spreadsheet.add_worksheet(
+                title=SHEET_NAMES['agents'], rows=1000, cols=20
+            )
+            
+            # 添加新表头
+            worksheet.append_row(AGENTS_HEADERS)
+            logger.info(f"✅ 创建新的代理商管理表: {SHEET_NAMES['agents']}")
+            
+            # 恢复数据（只保留Name、IC和Phone三列）
+            for agent in agents_data:
+                try:
+                    # 只添加需要的三列数据
+                    row_data = [
+                        agent.get('Name', ''),
+                        agent.get('IC', ''),  # 使用IC字段
+                        agent.get('Phone', '')
+                    ]
+                    worksheet.append_row(row_data)
+                except Exception as e:
+                    logger.error(f"❌ 恢复代理商数据失败: {e}")
+            
+            # 清除缓存，确保下次获取最新数据
+            self.clear_cache()
+            logger.info(f"✅ 成功更新代理商管理表结构")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ 更新代理商管理表失败: {e}")
+            return False
     
     # =============================================================================
     # 供应商管理
@@ -558,7 +625,14 @@ class GoogleSheetsManager:
             return False
     
     def get_pics(self, active_only: bool = True) -> List[Dict]:
-        """获取负责人列表"""
+        """获取负责人列表，使用缓存提高响应速度"""
+        cache_key = f"pics_{active_only}"
+        # 检查缓存是否有效（30分钟内）
+        if cache_key in self._cache and cache_key in self._cache_expiry:
+            if datetime.now() < self._cache_expiry[cache_key]:
+                logger.info(f"✅ 使用缓存的负责人列表")
+                return self._cache[cache_key]
+        
         try:
             worksheet = self.get_worksheet(SHEET_NAMES['pic'])
             if not worksheet:
@@ -567,13 +641,76 @@ class GoogleSheetsManager:
             records = worksheet.get_all_records()
             
             if active_only:
-                return [r for r in records if r.get('Status') == 'Active']
+                result = [r for r in records if r.get('Status') == 'Active']
+            else:
+                result = records
             
-            return records
+            # 更新缓存
+            self._cache[cache_key] = result
+            # 设置缓存过期时间（30分钟）
+            self._cache_expiry[cache_key] = datetime.now() + timedelta(minutes=30)
+            logger.info(f"✅ 已更新负责人列表缓存")
+            
+            return result
             
         except Exception as e:
             logger.error(f"❌ 获取负责人列表失败: {e}")
             return []
+            
+    def clear_cache(self):
+        """清除所有缓存"""
+        self._cache.clear()
+        self._cache_expiry.clear()
+        logger.info("✅ 已清除所有缓存")
+        
+    def update_pic_worksheet(self):
+        """手动更新负责人管理表，确保它存在并有正确的表头"""
+        try:
+            # 检查表是否存在
+            existing_sheets = [ws.title for ws in self.spreadsheet.worksheets()]
+            if SHEET_NAMES['pic'] not in existing_sheets:
+                # 创建新表
+                worksheet = self.spreadsheet.add_worksheet(
+                    title=SHEET_NAMES['pic'], rows=1000, cols=20
+                )
+                worksheet.append_row(PICS_HEADERS)
+                logger.info(f"✅ 创建负责人管理表: {SHEET_NAMES['pic']}")
+            else:
+                # 表已存在，确保表头正确
+                worksheet = self.spreadsheet.worksheet(SHEET_NAMES['pic'])
+                # 获取第一行
+                first_row = worksheet.row_values(1)
+                if first_row != PICS_HEADERS:
+                    # 备份数据
+                    pic_data = worksheet.get_all_records()
+                    # 删除旧表
+                    self.spreadsheet.del_worksheet(worksheet)
+                    # 创建新表
+                    new_worksheet = self.spreadsheet.add_worksheet(
+                        title=SHEET_NAMES['pic'], rows=1000, cols=20
+                    )
+                    new_worksheet.append_row(PICS_HEADERS)
+                    # 恢复数据
+                    for pic in pic_data:
+                        try:
+                            row_data = [
+                                pic.get('Name', ''),
+                                pic.get('Contact', ''),
+                                pic.get('Phone', ''),
+                                pic.get('Department', ''),
+                                pic.get('Status', 'Active')
+                            ]
+                            new_worksheet.append_row(row_data)
+                        except Exception as e:
+                            logger.error(f"❌ 恢复负责人数据失败: {e}")
+                    logger.info(f"✅ 更新负责人管理表: {SHEET_NAMES['pic']}")
+            
+            # 清除缓存，确保下次获取最新数据
+            self.clear_cache()
+            return True
+        except Exception as e:
+            logger.error(f"❌ 更新负责人管理表失败: {e}")
+            return False
     
     # =============================================================================
     # 报表生成
@@ -621,99 +758,6 @@ class GoogleSheetsManager:
         except Exception as e:
             logger.error(f"❌ 生成月度报表失败: {e}")
             return {}
-
-    def update_agents_worksheet(self):
-        """手动更新代理商管理表的表头结构"""
-        try:
-            # 检查表是否存在
-            existing_sheets = [ws.title for ws in self.spreadsheet.worksheets()]
-            if SHEET_NAMES['agents'] not in existing_sheets:
-                logger.error(f"❌ 代理商管理表不存在: {SHEET_NAMES['agents']}")
-                return False
-            
-            # 先备份现有数据
-            agents_ws = self.spreadsheet.worksheet(SHEET_NAMES['agents'])
-            agents_data = agents_ws.get_all_records()
-            
-            # 删除旧表
-            self.spreadsheet.del_worksheet(agents_ws)
-            logger.info(f"✅ 删除旧的代理商管理表: {SHEET_NAMES['agents']}")
-            
-            # 创建新表
-            worksheet = self.spreadsheet.add_worksheet(
-                title=SHEET_NAMES['agents'], rows=1000, cols=20
-            )
-            
-            # 添加新表头
-            worksheet.append_row(AGENTS_HEADERS)
-            logger.info(f"✅ 创建新的代理商管理表: {SHEET_NAMES['agents']}")
-            
-            # 恢复数据（只保留Name、IC和Phone三列）
-            for agent in agents_data:
-                try:
-                    # 只添加需要的三列数据
-                    row_data = [
-                        agent.get('Name', ''),
-                        agent.get('IC', ''),  # 使用IC字段
-                        agent.get('Phone', '')
-                    ]
-                    worksheet.append_row(row_data)
-                except Exception as e:
-                    logger.error(f"❌ 恢复代理商数据失败: {e}")
-            
-            logger.info(f"✅ 成功更新代理商管理表结构")
-            return True
-            
-        except Exception as e:
-            logger.error(f"❌ 更新代理商管理表失败: {e}")
-            return False
-
-    def update_pic_worksheet(self):
-        """手动更新负责人管理表，确保它存在并有正确的表头"""
-        try:
-            # 检查表是否存在
-            existing_sheets = [ws.title for ws in self.spreadsheet.worksheets()]
-            if SHEET_NAMES['pic'] not in existing_sheets:
-                # 创建新表
-                worksheet = self.spreadsheet.add_worksheet(
-                    title=SHEET_NAMES['pic'], rows=1000, cols=20
-                )
-                worksheet.append_row(PICS_HEADERS)
-                logger.info(f"✅ 创建负责人管理表: {SHEET_NAMES['pic']}")
-            else:
-                # 表已存在，确保表头正确
-                worksheet = self.spreadsheet.worksheet(SHEET_NAMES['pic'])
-                # 获取第一行
-                first_row = worksheet.row_values(1)
-                if first_row != PICS_HEADERS:
-                    # 备份数据
-                    pic_data = worksheet.get_all_records()
-                    # 删除旧表
-                    self.spreadsheet.del_worksheet(worksheet)
-                    # 创建新表
-                    new_worksheet = self.spreadsheet.add_worksheet(
-                        title=SHEET_NAMES['pic'], rows=1000, cols=20
-                    )
-                    new_worksheet.append_row(PICS_HEADERS)
-                    # 恢复数据
-                    for pic in pic_data:
-                        try:
-                            row_data = [
-                                pic.get('Name', ''),
-                                pic.get('Contact', ''),
-                                pic.get('Phone', ''),
-                                pic.get('Department', ''),
-                                pic.get('Status', 'Active')
-                            ]
-                            new_worksheet.append_row(row_data)
-                        except Exception as e:
-                            logger.error(f"❌ 恢复负责人数据失败: {e}")
-                    logger.info(f"✅ 更新负责人管理表: {SHEET_NAMES['pic']}")
-            
-            return True
-        except Exception as e:
-            logger.error(f"❌ 更新负责人管理表失败: {e}")
-            return False
 
 # 创建全局实例
 sheets_manager = GoogleSheetsManager()
