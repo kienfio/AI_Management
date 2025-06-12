@@ -284,6 +284,12 @@ async def sales_bill_to_handler(update: Update, context: ContextTypes.DEFAULT_TY
     
     # 如果选择的是代理商，先获取代理商列表
     try:
+        # 先发送加载提示
+        loading_message = await update.message.reply_text(
+            "⏳ <b>Loading Agent list...</b>",
+            parse_mode=ParseMode.HTML
+        )
+        
         # 获取代理商列表
         sheets_manager = SheetsManager()
         agents = sheets_manager.get_agents(active_only=True)
@@ -294,7 +300,7 @@ async def sales_bill_to_handler(update: Update, context: ContextTypes.DEFAULT_TY
                         [InlineKeyboardButton("❌ Cancel", callback_data="back_main")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            await update.message.reply_text(
+            await loading_message.edit_text(
                 "⚠️ <b>No agents found</b>\n\nPlease create an agent first.",
                 parse_mode=ParseMode.HTML,
                 reply_markup=reply_markup
@@ -313,7 +319,7 @@ async def sales_bill_to_handler(update: Update, context: ContextTypes.DEFAULT_TY
         keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="back_main")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await update.message.reply_text(
+        await loading_message.edit_text(
             "🤝 <b>Select Agent:</b>",
             parse_mode=ParseMode.HTML,
             reply_markup=reply_markup
@@ -1742,6 +1748,7 @@ def register_handlers(application):
     application.add_handler(CommandHandler("SaleInvoice", sale_invoice_command))
     application.add_handler(CommandHandler("UpdateAgents", update_agents_command))  # 添加更新代理商管理表的命令
     application.add_handler(CommandHandler("UpdatePICs", update_pics_command))  # 添加更新负责人管理表的命令
+    application.add_handler(CommandHandler("PreloadCache", preload_cache_command))  # 添加预加载缓存的命令
     
     # 回调查询处理器 (放在会话处理器之后)
     application.add_handler(CallbackQueryHandler(sales_callback_handler, pattern='^sales_'))
@@ -2026,6 +2033,19 @@ async def sale_invoice_command(update: Update, context: ContextTypes.DEFAULT_TYP
     # 判断是命令还是回调查询
     is_callback = update.callback_query is not None
     
+    # 先发送加载提示
+    if is_callback:
+        await update.callback_query.answer("Loading...")
+        loading_message = await update.callback_query.edit_message_text(
+            "⏳ <b>Loading Person in Charge list...</b>",
+            parse_mode=ParseMode.HTML
+        )
+    else:
+        loading_message = await update.message.reply_text(
+            "⏳ <b>Loading Person in Charge list...</b>",
+            parse_mode=ParseMode.HTML
+        )
+    
     try:
         # 获取负责人列表
         sheets_manager = SheetsManager()
@@ -2046,7 +2066,7 @@ async def sale_invoice_command(update: Update, context: ContextTypes.DEFAULT_TYP
                     reply_markup=reply_markup
                 )
             else:
-                await update.message.reply_text(
+                await loading_message.edit_text(
                     message,
                     parse_mode=ParseMode.HTML,
                     reply_markup=reply_markup
@@ -2074,7 +2094,7 @@ async def sale_invoice_command(update: Update, context: ContextTypes.DEFAULT_TYP
                 reply_markup=reply_markup
             )
         else:
-            await update.message.reply_text(
+            await loading_message.edit_text(
                 message,
                 parse_mode=ParseMode.HTML,
                 reply_markup=reply_markup
@@ -2094,7 +2114,7 @@ async def sale_invoice_command(update: Update, context: ContextTypes.DEFAULT_TYP
                 parse_mode=ParseMode.HTML
             )
         else:
-            await update.message.reply_text(
+            await loading_message.edit_text(
                 error_message,
                 parse_mode=ParseMode.HTML
             )
@@ -2344,5 +2364,38 @@ async def update_pics_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.error(f"❌ 执行更新负责人管理表命令失败: {e}")
         await update.message.reply_text(
             "❌ 更新负责人管理表时发生错误，请查看日志了解详情。",
+            parse_mode=ParseMode.HTML
+        )
+
+async def preload_cache_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """处理 /PreloadCache 命令 - 预加载所有缓存数据"""
+    loading_message = await update.message.reply_text(
+        "⏳ <b>Preloading cache data...</b>",
+        parse_mode=ParseMode.HTML
+    )
+    
+    try:
+        sheets_manager = SheetsManager()
+        
+        # 预加载负责人列表
+        pics = sheets_manager.get_pics(active_only=True)
+        pics_count = len(pics)
+        
+        # 预加载代理商列表
+        agents = sheets_manager.get_agents(active_only=True)
+        agents_count = len(agents)
+        
+        await loading_message.edit_text(
+            f"✅ <b>Cache preloaded successfully!</b>\n\n"
+            f"📊 <b>Stats:</b>\n"
+            f"- {pics_count} Person in Charge loaded\n"
+            f"- {agents_count} Agents loaded\n\n"
+            f"<i>Response time should be faster now.</i>",
+            parse_mode=ParseMode.HTML
+        )
+    except Exception as e:
+        logger.error(f"❌ 预加载缓存失败: {e}")
+        await loading_message.edit_text(
+            "❌ <b>Failed to preload cache</b>\n\nPlease try again later.",
             parse_mode=ParseMode.HTML
         )
