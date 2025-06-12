@@ -140,30 +140,47 @@ class GoogleSheetsManager:
     
     def _ensure_worksheets_exist(self):
         """确保所有必需的工作表存在"""
-        existing_sheets = [ws.title for ws in self.spreadsheet.worksheets()]
-        
-        # 创建缺失的工作表
-        for sheet_key, sheet_name in SHEET_NAMES.items():
-            if sheet_name not in existing_sheets:
-                worksheet = self.spreadsheet.add_worksheet(
-                    title=sheet_name, rows=1000, cols=20
-                )
-                
-                # 添加表头
-                if sheet_key == 'sales':
-                    worksheet.append_row(SALES_HEADERS)
-                elif sheet_key == 'expenses':
-                    worksheet.append_row(EXPENSES_HEADERS)
-                elif sheet_key == 'agents':
-                    worksheet.append_row(AGENTS_HEADERS)
-                elif sheet_key == 'suppliers':
-                    worksheet.append_row(SUPPLIERS_HEADERS)
-                elif sheet_key == 'workers':
-                    worksheet.append_row(WORKERS_HEADERS)
-                elif sheet_key == 'pic':
-                    worksheet.append_row(PICS_HEADERS)
-                
-                logger.info(f"✅ 创建工作表: {sheet_name}")
+        try:
+            logger.info("开始检查和创建必要的工作表")
+            existing_sheets = [ws.title for ws in self.spreadsheet.worksheets()]
+            logger.info(f"现有工作表: {existing_sheets}")
+            
+            # 创建缺失的工作表
+            for sheet_key, sheet_name in SHEET_NAMES.items():
+                if sheet_name not in existing_sheets:
+                    logger.info(f"创建工作表: {sheet_name}")
+                    try:
+                        worksheet = self.spreadsheet.add_worksheet(
+                            title=sheet_name, rows=1000, cols=20
+                        )
+                        
+                        # 添加表头
+                        headers = None
+                        if sheet_key == 'sales':
+                            headers = SALES_HEADERS
+                        elif sheet_key == 'expenses':
+                            headers = EXPENSES_HEADERS
+                        elif sheet_key == 'agents':
+                            headers = AGENTS_HEADERS
+                        elif sheet_key == 'suppliers':
+                            headers = SUPPLIERS_HEADERS
+                        elif sheet_key == 'workers':
+                            headers = WORKERS_HEADERS
+                        elif sheet_key == 'pic':
+                            headers = PICS_HEADERS
+                        
+                        if headers:
+                            logger.info(f"为工作表 {sheet_name} 添加表头: {headers}")
+                            worksheet.append_row(headers)
+                        
+                        logger.info(f"✅ 成功创建工作表: {sheet_name}")
+                    except Exception as e:
+                        logger.error(f"❌ 创建工作表 {sheet_name} 失败: {e}")
+                else:
+                    logger.info(f"工作表已存在: {sheet_name}")
+        except Exception as e:
+            logger.error(f"❌ 确保工作表存在时发生错误: {e}")
+            raise
     
     def get_worksheet(self, sheet_name: str):
         """获取指定工作表"""
@@ -420,12 +437,21 @@ class GoogleSheetsManager:
     def add_pic(self, data: Dict[str, Any]) -> bool:
         """添加负责人"""
         try:
+            logger.info(f"开始添加负责人，数据: {data}")
             worksheet = self.get_worksheet(SHEET_NAMES['pic'])
             if not worksheet:
+                logger.error("获取负责人工作表失败")
                 return False
             
+            # 确保所有必要的字段都存在
+            name = data.get('姓名', '')
+            if not name:
+                logger.error("负责人姓名不能为空")
+                return False
+            
+            logger.info(f"准备添加负责人行数据，姓名: {name}")
             row_data = [
-                data.get('姓名', ''),
+                name,  # 姓名
                 data.get('联系人', ''),
                 data.get('电话', ''),
                 data.get('部门', ''),
@@ -433,7 +459,7 @@ class GoogleSheetsManager:
             ]
             
             worksheet.append_row(row_data)
-            logger.info(f"✅ 负责人添加成功: {data.get('姓名')}")
+            logger.info(f"✅ 负责人添加成功: {name}")
             return True
             
         except Exception as e:
@@ -443,14 +469,23 @@ class GoogleSheetsManager:
     def get_pics(self, active_only: bool = True) -> List[Dict]:
         """获取负责人列表"""
         try:
+            logger.info("开始获取负责人列表")
             worksheet = self.get_worksheet(SHEET_NAMES['pic'])
             if not worksheet:
+                logger.error("获取负责人工作表失败")
                 return []
             
             records = worksheet.get_all_records()
+            logger.info(f"获取到 {len(records)} 条负责人记录")
+            
+            # 打印记录的键名，用于调试
+            if records:
+                logger.info(f"记录的键名: {list(records[0].keys())}")
             
             if active_only:
-                return [r for r in records if r.get('状态') == '激活']
+                active_records = [r for r in records if r.get('状态') == '激活']
+                logger.info(f"筛选后的激活负责人数量: {len(active_records)}")
+                return active_records
             
             return records
             
@@ -507,3 +542,38 @@ class GoogleSheetsManager:
 
 # 创建全局实例
 sheets_manager = GoogleSheetsManager()
+
+# 添加一个测试函数，用于测试负责人的添加和获取
+def test_pic_functions():
+    """测试负责人的添加和获取"""
+    try:
+        logger.info("开始测试负责人功能")
+        
+        # 添加一个测试负责人
+        test_pic = {
+            '姓名': 'Test Person',
+            '联系人': 'Test Contact',
+            '电话': '12345678',
+            '部门': 'Test Department',
+            '状态': '激活'
+        }
+        
+        result = sheets_manager.add_pic(test_pic)
+        logger.info(f"添加测试负责人结果: {result}")
+        
+        # 获取所有负责人
+        pics = sheets_manager.get_pics()
+        logger.info(f"获取到 {len(pics)} 个负责人")
+        
+        # 打印第一个负责人的信息
+        if pics:
+            logger.info(f"第一个负责人: {pics[0]}")
+        
+        return result
+    except Exception as e:
+        logger.error(f"测试负责人功能失败: {e}")
+        return False
+
+# 如果需要测试，可以取消下面的注释
+# if __name__ == "__main__":
+#     test_pic_functions()
