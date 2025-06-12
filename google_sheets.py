@@ -142,8 +142,16 @@ class GoogleSheetsManager:
         """确保所有必需的工作表存在"""
         existing_sheets = [ws.title for ws in self.spreadsheet.worksheets()]
         
-        # 创建缺失的工作表
-        for sheet_key, sheet_name in SHEET_NAMES.items():
+        # 定义要在Google Sheet中显示的工作表
+        visible_sheets = {
+            'sales': SHEET_NAMES['sales'],
+            'expenses': SHEET_NAMES['expenses'],
+            'agents': SHEET_NAMES['agents'],
+            'suppliers': SHEET_NAMES['suppliers']
+        }
+        
+        # 创建缺失的工作表（只创建可见的工作表）
+        for sheet_key, sheet_name in visible_sheets.items():
             if sheet_name not in existing_sheets:
                 worksheet = self.spreadsheet.add_worksheet(
                     title=sheet_name, rows=1000, cols=20
@@ -158,16 +166,78 @@ class GoogleSheetsManager:
                     worksheet.append_row(AGENTS_HEADERS)
                 elif sheet_key == 'suppliers':
                     worksheet.append_row(SUPPLIERS_HEADERS)
-                elif sheet_key == 'workers':
-                    worksheet.append_row(WORKERS_HEADERS)
-                elif sheet_key == 'pic':
-                    worksheet.append_row(PICS_HEADERS)
                 
                 logger.info(f"✅ 创建工作表: {sheet_name}")
+        
+        # 移除不需要显示的工作表（如果存在）
+        for sheet_key, sheet_name in SHEET_NAMES.items():
+            if sheet_key not in visible_sheets and sheet_name in existing_sheets:
+                try:
+                    worksheet = self.spreadsheet.worksheet(sheet_name)
+                    self.spreadsheet.del_worksheet(worksheet)
+                    logger.info(f"✅ 移除工作表: {sheet_name}")
+                except Exception as e:
+                    logger.error(f"❌ 移除工作表失败 {sheet_name}: {e}")
+                    # 继续执行，不中断程序
     
     def get_worksheet(self, sheet_name: str):
-        """获取指定工作表"""
+        """获取指定工作表，对于不存在的工作表（workers和pic）使用内存中的数据"""
         try:
+            # 对于不在Google Sheet中显示的工作表，使用内存中的数据
+            if sheet_name == SHEET_NAMES['workers'] or sheet_name == SHEET_NAMES['pic']:
+                # 检查是否已经有内存中的数据
+                if not hasattr(self, '_memory_worksheets'):
+                    self._memory_worksheets = {}
+                
+                if sheet_name not in self._memory_worksheets:
+                    # 创建一个内存中的工作表对象
+                    from collections import namedtuple
+                    MemoryWorksheet = namedtuple('MemoryWorksheet', ['title', 'data', 'headers'])
+                    
+                    # 设置对应的表头
+                    if sheet_name == SHEET_NAMES['workers']:
+                        headers = WORKERS_HEADERS
+                    else:  # pic
+                        headers = PICS_HEADERS
+                    
+                    # 创建内存工作表
+                    self._memory_worksheets[sheet_name] = MemoryWorksheet(
+                        title=sheet_name,
+                        data=[],  # 存储行数据
+                        headers=headers
+                    )
+                    logger.info(f"✅ 创建内存工作表: {sheet_name}")
+                
+                # 返回内存中的工作表对象
+                memory_worksheet = self._memory_worksheets[sheet_name]
+                
+                # 添加必要的方法，使其行为类似于gspread的worksheet
+                class MemoryWorksheetWrapper:
+                    def __init__(self, memory_ws):
+                        self.memory_ws = memory_ws
+                    
+                    def append_row(self, row_data):
+                        self.memory_ws.data.append(row_data)
+                        return True
+                    
+                    def get_all_records(self):
+                        if not self.memory_ws.data:
+                            return []
+                        
+                        records = []
+                        for row in self.memory_ws.data:
+                            record = {}
+                            for i, header in enumerate(self.memory_ws.headers):
+                                if i < len(row):
+                                    record[header] = row[i]
+                                else:
+                                    record[header] = ''
+                            records.append(record)
+                        return records
+                
+                return MemoryWorksheetWrapper(memory_worksheet)
+            
+            # 对于正常的工作表，使用Google Sheet
             return self.spreadsheet.worksheet(sheet_name)
         except Exception as e:
             logger.error(f"❌ 获取工作表失败 {sheet_name}: {e}")
