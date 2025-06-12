@@ -1947,8 +1947,8 @@ async def sale_invoice_command(update: Update, context: ContextTypes.DEFAULT_TYP
         # 创建负责人选择按钮
         keyboard = []
         for pic in pics:
-            # 使用姓名作为按钮文本
-            name = pic.get('姓名', '')
+            # 使用姓名作为按钮文本，兼容'姓名'和'name'字段
+            name = pic.get('姓名', pic.get('name', ''))
             if name:
                 keyboard.append([InlineKeyboardButton(f"👤 {name}", callback_data=f"pic_{name}")])
         
