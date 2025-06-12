@@ -24,7 +24,7 @@ SHEET_NAMES = {
 
 SALES_HEADERS = ['Date', 'Personal in charge', 'Invoice Amount', 'Client Type', 'Commission Rate', 'Commission Amount', 'Notes']
 EXPENSES_HEADERS = ['Date', 'Expense Type', 'Supplier', 'Amount', 'Category', 'Description']
-AGENTS_HEADERS = ['Name', 'Contact', 'Phone', 'Email', 'Commission Rate', 'Status']
+AGENTS_HEADERS = ['Name', 'IC', 'Phone']
 SUPPLIERS_HEADERS = ['Supplier Name', 'Contact', 'Phone', 'Email', 'Product/Service', 'Status']
 WORKERS_HEADERS = ['Name', 'Contact', 'Phone', 'Position', 'Status']
 PICS_HEADERS = ['Name', 'Contact', 'Phone', 'Department', 'Status']
@@ -374,14 +374,11 @@ class GoogleSheetsManager:
             if not worksheet:
                 return False
             
-            # 使用英文字段名
+            # 使用英文字段名，只添加三列数据
             row_data = [
                 data.get('name', ''),
-                data.get('contact', ''),
-                data.get('phone', ''),
-                data.get('email', ''),
-                data.get('commission_rate', 0),
-                data.get('status', 'Active')
+                data.get('ic', ''),  # 使用ic字段
+                data.get('phone', '')
             ]
             
             worksheet.append_row(row_data)
@@ -401,9 +398,7 @@ class GoogleSheetsManager:
             
             records = worksheet.get_all_records()
             
-            if active_only:
-                return [r for r in records if r.get('Status') == 'Active']
-            
+            # 由于不再有Status字段，直接返回所有记录
             return records
             
         except Exception as e:
