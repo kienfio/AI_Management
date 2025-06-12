@@ -968,35 +968,63 @@ async def cost_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await query.answer()
     
     try:
+        from config import GoogleSheetsManager
+        
+        # 创建Google Sheets管理器实例
+        sheets_manager = GoogleSheetsManager()
+        
         # 获取数据
-        cost_type = context.user_data['cost_type']
-        amount = context.user_data['cost_amount']
+        cost_type = context.user_data.get('cost_type', '')
+        amount = context.user_data.get('cost_amount', 0)
         supplier = context.user_data.get('cost_supplier', '')
-        desc = context.user_data.get('cost_desc', '')
-        receipt = context.user_data.get('cost_receipt', '')
+        description = context.user_data.get('cost_desc', '')
+        receipt_url = context.user_data.get('receipt_url', '')
         
-        # 记录到Google Sheets
-        date_str = datetime.now().strftime('%Y-%m-%d')
+        # 如果是账单类型，根据不同类型设置描述
+        if cost_type.endswith("Bill") and cost_type != "Other Bill":
+            # 对于标准账单，如水电网络等，使用类型作为描述
+            category = "Utility"
+        elif cost_type.startswith("Other Bill:"):
+            # 对于其他账单，保留描述
+            cost_type = "Other Bill"
+            category = "Other"
+        elif cost_type == "Worker Salary":
+            category = "Salary"
+        elif cost_type == "Purchasing":
+            category = "Purchase"
+        else:
+            category = "Other"
         
-        sheets_manager = SheetsManager()
-        data = {
-            'date': date_str,
+        # 添加收据URL到描述
+        if receipt_url:
+            if description:
+                description = f"{description} | Receipt: {receipt_url}"
+            else:
+                description = f"Receipt: {receipt_url}"
+        
+        # 准备数据
+        expense_data = {
+            'date': datetime.now().strftime('%Y-%m-%d'),
             'type': cost_type,
             'supplier': supplier,
             'amount': amount,
-            'category': supplier if supplier else 'Other',
-            'description': desc
+            'category': category,
+            'description': description
         }
-        sheets_manager.add_expense_record(data)
         
-        # 显示成功消息
-        await query.edit_message_text(
-            "✅ <b>Expense has been saved successfully!</b>",
-            parse_mode=ParseMode.HTML
-        )
+        # 保存到Google Sheets
+        success = sheets_manager.add_expense_record(expense_data)
         
-        # 清除用户数据
-        context.user_data.clear()
+        if success:
+            await query.edit_message_text(
+                "✅ <b>Expense saved successfully!</b>",
+                parse_mode=ParseMode.HTML
+            )
+        else:
+            await query.edit_message_text(
+                "❌ <b>Failed to save expense</b>",
+                parse_mode=ParseMode.HTML
+            )
         
         # 结束对话
         return ConversationHandler.END
@@ -1011,26 +1039,76 @@ async def cost_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def cost_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """处理收据上传"""
-    # 这里可以处理照片或文件
-    if update.message.photo:
-        # 如果是照片，获取最高质量的照片ID
-        file_id = update.message.photo[-1].file_id
-        context.user_data['cost_receipt'] = file_id
-        context.user_data['cost_receipt_type'] = 'photo'
-    elif update.message.document:
-        # 如果是文件，获取文件ID
-        file_id = update.message.document.file_id
-        context.user_data['cost_receipt'] = file_id
-        context.user_data['cost_receipt_type'] = 'document'
-    else:
-        # 如果没有上传图片或文档，提示用户
-        await update.message.reply_html(
-            "⚠️ <b>Please upload a photo or document as receipt.</b>\n\nOr type /skip to continue without receipt."
-        )
-        return COST_RECEIPT
-    
-    # 继续到确认页面
-    return await show_cost_confirmation(update, context)
+    try:
+        from config import GoogleSheetsManager
+        
+        # 创建Google Sheets管理器实例
+        sheets_manager = GoogleSheetsManager()
+        
+        # 这里可以处理照片或文件
+        if update.message.photo:
+            # 如果是照片，获取最高质量的照片ID
+            file_id = update.message.photo[-1].file_id
+            context.user_data['cost_receipt'] = file_id
+            context.user_data['cost_receipt_type'] = 'photo'
+            
+            # 获取文件对象
+            file_obj = await context.bot.get_file(file_id)
+            
+            # 生成唯一文件名
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            file_name = f"receipt_{timestamp}.jpg"
+            
+            # 告诉用户正在上传
+            status_message = await update.message.reply_text("📤 正在上传照片到Google Drive...")
+            
+            # 上传文件到Google Drive
+            file_url = sheets_manager.upload_telegram_file(file_obj, file_name)
+            
+            if file_url:
+                # 保存URL到用户数据
+                context.user_data['receipt_url'] = file_url
+                await status_message.edit_text("✅ 照片上传成功！")
+            else:
+                await status_message.edit_text("⚠️ 照片上传失败，但您可以继续操作")
+            
+        elif update.message.document:
+            # 如果是文件，获取文件ID
+            file_id = update.message.document.file_id
+            file_name = update.message.document.file_name or "document"
+            context.user_data['cost_receipt'] = file_id
+            context.user_data['cost_receipt_type'] = 'document'
+            
+            # 获取文件对象
+            file_obj = await context.bot.get_file(file_id)
+            
+            # 告诉用户正在上传
+            status_message = await update.message.reply_text("📤 正在上传文件到Google Drive...")
+            
+            # 上传文件到Google Drive
+            file_url = sheets_manager.upload_telegram_file(file_obj, file_name)
+            
+            if file_url:
+                # 保存URL到用户数据
+                context.user_data['receipt_url'] = file_url
+                await status_message.edit_text("✅ 文件上传成功！")
+            else:
+                await status_message.edit_text("⚠️ 文件上传失败，但您可以继续操作")
+            
+        else:
+            # 如果没有上传图片或文档，提示用户
+            await update.message.reply_html(
+                "⚠️ <b>Please upload a photo or document as receipt.</b>\n\nOr type /skip to continue without receipt."
+            )
+            return COST_RECEIPT
+        
+        # 继续到确认页面
+        return await show_cost_confirmation(update, context)
+        
+    except Exception as e:
+        logger.error(f"❌ 处理收据上传失败: {e}")
+        # 即使上传失败，也继续流程
+        return await show_cost_confirmation(update, context)
 
 async def show_cost_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """显示费用确认信息"""
