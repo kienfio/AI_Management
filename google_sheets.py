@@ -168,18 +168,55 @@ class GoogleSheetsManager:
                             headers = WORKERS_HEADERS
                         elif sheet_key == 'pic':
                             headers = PICS_HEADERS
+                            logger.info(f"为负责人工作表添加表头: {headers}")
                         
                         if headers:
                             logger.info(f"为工作表 {sheet_name} 添加表头: {headers}")
-                            worksheet.append_row(headers)
+                            try:
+                                worksheet.append_row(headers)
+                                logger.info(f"成功添加表头到工作表 {sheet_name}")
+                            except Exception as header_error:
+                                logger.error(f"添加表头到工作表 {sheet_name} 失败: {header_error}")
                         
                         logger.info(f"✅ 成功创建工作表: {sheet_name}")
                     except Exception as e:
                         logger.error(f"❌ 创建工作表 {sheet_name} 失败: {e}")
+                        # 如果是负责人工作表，尝试更详细的错误处理
+                        if sheet_key == 'pic':
+                            import traceback
+                            logger.error(f"创建负责人工作表失败详情: {traceback.format_exc()}")
                 else:
                     logger.info(f"工作表已存在: {sheet_name}")
+                    
+                    # 如果是负责人工作表，检查表头是否正确
+                    if sheet_key == 'pic':
+                        try:
+                            worksheet = self.spreadsheet.worksheet(sheet_name)
+                            headers = worksheet.row_values(1)
+                            logger.info(f"负责人工作表现有表头: {headers}")
+                            
+                            # 检查表头是否包含所有必要字段
+                            expected_headers = PICS_HEADERS
+                            if not all(header in headers for header in expected_headers):
+                                logger.warning(f"负责人工作表表头不完整，期望: {expected_headers}, 实际: {headers}")
+                                
+                                # 如果表头为空或完全不匹配，尝试重新设置表头
+                                if not headers or len(set(headers) & set(expected_headers)) < 2:
+                                    try:
+                                        logger.info("尝试更新负责人工作表表头")
+                                        # 清空现有行
+                                        worksheet.clear()
+                                        # 添加正确的表头
+                                        worksheet.append_row(PICS_HEADERS)
+                                        logger.info(f"成功更新负责人工作表表头: {PICS_HEADERS}")
+                                    except Exception as update_header_error:
+                                        logger.error(f"更新负责人工作表表头失败: {update_header_error}")
+                        except Exception as header_check_error:
+                            logger.error(f"检查负责人工作表表头失败: {header_check_error}")
         except Exception as e:
             logger.error(f"❌ 确保工作表存在时发生错误: {e}")
+            import traceback
+            logger.error(f"确保工作表存在错误详情: {traceback.format_exc()}")
             raise
     
     def get_worksheet(self, sheet_name: str):
@@ -441,13 +478,33 @@ class GoogleSheetsManager:
             worksheet = self.get_worksheet(SHEET_NAMES['pic'])
             if not worksheet:
                 logger.error("获取负责人工作表失败")
-                return False
+                # 尝试确保工作表存在
+                try:
+                    logger.info("尝试创建负责人工作表")
+                    self._ensure_worksheets_exist()
+                    worksheet = self.get_worksheet(SHEET_NAMES['pic'])
+                    if not worksheet:
+                        logger.error("创建负责人工作表后仍然无法获取")
+                        return False
+                except Exception as ws_error:
+                    logger.error(f"创建负责人工作表失败: {ws_error}")
+                    return False
             
             # 确保所有必要的字段都存在
             name = data.get('姓名', '')
             if not name:
                 logger.error("负责人姓名不能为空")
                 return False
+            
+            # 检查工作表的表头
+            try:
+                headers = worksheet.row_values(1)
+                logger.info(f"负责人工作表表头: {headers}")
+                if '姓名' not in headers and headers:
+                    # 如果表头不包含'姓名'字段但有其他表头，可能是字段名不匹配
+                    logger.warning(f"负责人工作表表头不包含'姓名'字段: {headers}")
+            except Exception as header_error:
+                logger.error(f"获取负责人工作表表头失败: {header_error}")
             
             logger.info(f"准备添加负责人行数据，姓名: {name}")
             row_data = [
@@ -458,12 +515,16 @@ class GoogleSheetsManager:
                 data.get('状态', '激活')
             ]
             
+            logger.info(f"添加行数据: {row_data}")
             worksheet.append_row(row_data)
             logger.info(f"✅ 负责人添加成功: {name}")
             return True
             
         except Exception as e:
             logger.error(f"❌ 添加负责人失败: {e}")
+            # 打印更详细的异常信息
+            import traceback
+            logger.error(f"异常详情: {traceback.format_exc()}")
             return False
     
     def get_pics(self, active_only: bool = True) -> List[Dict]:
@@ -473,24 +534,60 @@ class GoogleSheetsManager:
             worksheet = self.get_worksheet(SHEET_NAMES['pic'])
             if not worksheet:
                 logger.error("获取负责人工作表失败")
+                # 尝试确保工作表存在
+                try:
+                    logger.info("尝试创建负责人工作表")
+                    self._ensure_worksheets_exist()
+                    worksheet = self.get_worksheet(SHEET_NAMES['pic'])
+                    if not worksheet:
+                        logger.error("创建负责人工作表后仍然无法获取")
+                        return []
+                except Exception as ws_error:
+                    logger.error(f"创建负责人工作表失败: {ws_error}")
+                    return []
+            
+            try:
+                records = worksheet.get_all_records()
+                logger.info(f"获取到 {len(records)} 条负责人记录")
+                
+                # 打印记录的键名，用于调试
+                if records:
+                    logger.info(f"记录的键名: {list(records[0].keys())}")
+                else:
+                    logger.warning("没有找到任何负责人记录")
+                    return []
+                
+                # 检查记录中是否包含'姓名'字段
+                if records and '姓名' not in records[0]:
+                    logger.warning(f"负责人记录中不包含'姓名'字段，可能是表头不匹配。键名: {list(records[0].keys())}")
+                    # 尝试查找可能的替代字段
+                    possible_name_fields = ['name', 'Name', '名字', '名称']
+                    for field in possible_name_fields:
+                        if field in records[0]:
+                            logger.info(f"找到可能的替代字段: {field}")
+                
+                if active_only:
+                    # 检查记录中是否包含'状态'字段
+                    if records and '状态' not in records[0]:
+                        logger.warning(f"负责人记录中不包含'状态'字段，无法筛选激活状态。键名: {list(records[0].keys())}")
+                        return records  # 如果没有状态字段，返回所有记录
+                    
+                    active_records = [r for r in records if r.get('状态') == '激活']
+                    logger.info(f"筛选后的激活负责人数量: {len(active_records)}")
+                    return active_records
+                
+                return records
+                
+            except Exception as record_error:
+                logger.error(f"获取负责人记录失败: {record_error}")
+                import traceback
+                logger.error(f"获取负责人记录失败详情: {traceback.format_exc()}")
                 return []
-            
-            records = worksheet.get_all_records()
-            logger.info(f"获取到 {len(records)} 条负责人记录")
-            
-            # 打印记录的键名，用于调试
-            if records:
-                logger.info(f"记录的键名: {list(records[0].keys())}")
-            
-            if active_only:
-                active_records = [r for r in records if r.get('状态') == '激活']
-                logger.info(f"筛选后的激活负责人数量: {len(active_records)}")
-                return active_records
-            
-            return records
             
         except Exception as e:
             logger.error(f"❌ 获取负责人列表失败: {e}")
+            import traceback
+            logger.error(f"获取负责人列表失败详情: {traceback.format_exc()}")
             return []
     
     # =============================================================================
