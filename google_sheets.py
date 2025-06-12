@@ -311,7 +311,49 @@ class GoogleSheetsManager:
             if not worksheet:
                 return []
             
-            records = worksheet.get_all_records()
+            # 获取所有数据（包括表头）
+            all_values = worksheet.get_all_values()
+            if not all_values or len(all_values) <= 1:  # 没有数据或只有表头
+                logger.warning("代理商工作表为空或只有表头")
+                return []
+            
+            # 获取表头和数据
+            headers = all_values[0]
+            data_rows = all_values[1:]
+            
+            # 检查表头是否有重复
+            header_counts = {}
+            for header in headers:
+                if header in header_counts:
+                    header_counts[header] += 1
+                else:
+                    header_counts[header] = 1
+            
+            # 如果有重复表头，修改表头使其唯一
+            unique_headers = []
+            for i, header in enumerate(headers):
+                if header_counts[header] > 1:
+                    # 为重复的表头添加序号
+                    count = 0
+                    for j in range(i+1):
+                        if headers[j] == header:
+                            count += 1
+                    if count > 1:  # 如果是第二个或更多的重复项
+                        unique_headers.append(f"{header}_{count}")
+                        continue
+                unique_headers.append(header)
+            
+            # 手动构建记录列表
+            records = []
+            for row in data_rows:
+                # 确保行的长度与表头一致
+                if len(row) < len(unique_headers):
+                    row.extend([''] * (len(unique_headers) - len(row)))
+                elif len(row) > len(unique_headers):
+                    row = row[:len(unique_headers)]
+                
+                record = {unique_headers[i]: value for i, value in enumerate(row)}
+                records.append(record)
             
             # 处理记录，确保每条记录都有'姓名'和'佣金比例'字段
             processed_records = []
