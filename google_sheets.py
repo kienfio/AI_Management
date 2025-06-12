@@ -425,15 +425,15 @@ class GoogleSheetsManager:
                 return False
             
             row_data = [
-                data.get('name', ''),
-                data.get('contact', ''),
-                data.get('phone', ''),
-                data.get('department', ''),
-                data.get('status', '激活')
+                data.get('姓名', ''),
+                data.get('联系人', ''),
+                data.get('电话', ''),
+                data.get('部门', ''),
+                data.get('状态', '激活')
             ]
             
             worksheet.append_row(row_data)
-            logger.info(f"✅ 负责人添加成功: {data.get('name')}")
+            logger.info(f"✅ 负责人添加成功: {data.get('姓名')}")
             return True
             
         except Exception as e:
