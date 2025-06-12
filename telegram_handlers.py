@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # ====================================
 
 # 销售记录状态
-SALES_PERSON, SALES_AMOUNT, SALES_CLIENT, SALES_COMMISSION_TYPE, SALES_COMMISSION_PERCENT, SALES_COMMISSION_AMOUNT, SALES_AGENT_SELECT, SALES_CONFIRM = range(8)
+SALES_PERSON, SALES_AMOUNT, SALES_BILL_TO, SALES_CLIENT, SALES_COMMISSION_TYPE, SALES_COMMISSION_PERCENT, SALES_COMMISSION_AMOUNT, SALES_AGENT_SELECT, SALES_CONFIRM = range(9)
 
 # 费用管理状态
 COST_TYPE, COST_SUPPLIER, COST_AMOUNT, COST_DESC, COST_RECEIPT, COST_CONFIRM = range(6)
@@ -221,20 +221,17 @@ async def sales_amount_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.info(f"解析后的金额: {amount}")
         context.user_data['sales_amount'] = amount
         
-        keyboard = [
-            [InlineKeyboardButton("🏢 Company", callback_data="client_company")],
-            [InlineKeyboardButton("🤝 Agent", callback_data="client_agent")],
-            [InlineKeyboardButton("❌ Cancel", callback_data="back_main")]
-        ]
+        # 添加Bill to步骤
+        keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_main")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await update.message.reply_text(
-            f"💰 <b>Amount:</b> RM{amount:,.2f}\n\n🎯 <b>Select Client Type:</b>",
+            f"💰 <b>Amount:</b> RM{amount:,.2f}\n\n📝 <b>Please enter Bill to (customer/company name):</b>",
             parse_mode=ParseMode.HTML,
             reply_markup=reply_markup
         )
-        logger.info(f"金额处理完成，等待客户类型选择")
-        return SALES_CLIENT
+        logger.info(f"金额处理完成，等待Bill to输入")
+        return SALES_BILL_TO
     except ValueError as e:
         logger.error(f"金额解析错误: {e}")
         await update.message.reply_text("⚠️ Please enter a valid amount")
@@ -243,6 +240,32 @@ async def sales_amount_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.error(f"处理金额时发生未知错误: {e}")
         await update.message.reply_text("❌ Error processing, please re-enter the amount")
         return SALES_AMOUNT
+
+async def sales_bill_to_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理Bill to输入"""
+    bill_to = update.message.text.strip()
+    context.user_data['bill_to'] = bill_to
+    logger.info(f"接收到Bill to输入: {bill_to}")
+    
+    # 继续到客户类型选择
+    keyboard = [
+        [InlineKeyboardButton("🏢 Company", callback_data="client_company")],
+        [InlineKeyboardButton("🤝 Agent", callback_data="client_agent")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="back_main")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    amount = context.user_data['sales_amount']
+    
+    await update.message.reply_text(
+        f"💰 <b>Amount:</b> RM{amount:,.2f}\n"
+        f"📝 <b>Bill to:</b> {bill_to}\n\n"
+        f"🎯 <b>Select Client Type:</b>",
+        parse_mode=ParseMode.HTML,
+        reply_markup=reply_markup
+    )
+    logger.info(f"Bill to处理完成，等待客户类型选择")
+    return SALES_CLIENT
 
 async def sales_client_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """处理客户类型选择"""
@@ -519,6 +542,7 @@ async def show_sales_confirmation(update: Update, context: ContextTypes.DEFAULT_
     commission_rate = context.user_data.get('commission_rate', 0) * 100
     person = context.user_data['sales_person']
     agent = context.user_data.get('sales_agent', '')
+    bill_to = context.user_data.get('bill_to', '')
     
     # 构建确认消息
     if client_type == "Agent":
@@ -533,6 +557,7 @@ async def show_sales_confirmation(update: Update, context: ContextTypes.DEFAULT_
 
 👤 <b>Person in Charge:</b> {person}
 💰 <b>Amount:</b> RM{amount:,.2f}
+📝 <b>Bill to:</b> {bill_to}
 🎯 <b>Client Type:</b> {client_display}
 {commission_display}
 
@@ -578,14 +603,17 @@ async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         elif commission_type == 'fixed':
             commission_note = "Fixed commission amount"
         
+        bill_to = context.user_data.get('bill_to', '')
+        
         sales_data = {
             'date': datetime.now().strftime('%Y-%m-%d %H:%M'),
             'person': context.user_data['sales_person'],
             'amount': context.user_data['sales_amount'],
+            'bill_to': bill_to,
             'client_type': client_type,
             'commission_rate': context.user_data.get('commission_rate', 0),
             'commission_amount': context.user_data['sales_commission'],
-            'notes': f"Agent: {agent_info}" + (f", {commission_note}" if commission_note else "")
+            'notes': f"Bill to: {bill_to}, Agent: {agent_info}" + (f", {commission_note}" if commission_note else "")
         }
         
         sheets_manager.add_sales_record(sales_data)
@@ -600,6 +628,7 @@ async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 👤 <b>Person in Charge:</b> {person}
 💰 <b>Amount:</b> RM{amount:,.2f}
+📝 <b>Bill to:</b> {bill_to}
 💵 <b>Commission:</b> RM{commission:,.2f}
 🕒 <b>Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M')}
 """
@@ -1548,6 +1577,7 @@ def get_conversation_handlers():
                 CallbackQueryHandler(sales_person_handler, pattern="^pic_")
             ],
             SALES_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, sales_amount_handler)],
+            SALES_BILL_TO: [MessageHandler(filters.TEXT & ~filters.COMMAND, sales_bill_to_handler)],
             SALES_CLIENT: [CallbackQueryHandler(sales_client_handler, pattern="^client_")],
             SALES_COMMISSION_TYPE: [
                 CallbackQueryHandler(sales_commission_type_handler, pattern="^commission_"),
