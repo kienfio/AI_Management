@@ -150,6 +150,22 @@ class GoogleSheetsManager:
             'suppliers': SHEET_NAMES['suppliers']
         }
         
+        # 重新创建代理商管理表，以更新表头
+        if SHEET_NAMES['agents'] in existing_sheets:
+            try:
+                # 先备份现有数据
+                agents_ws = self.spreadsheet.worksheet(SHEET_NAMES['agents'])
+                agents_data = agents_ws.get_all_records()
+                
+                # 删除旧表
+                self.spreadsheet.del_worksheet(agents_ws)
+                logger.info(f"✅ 删除旧的代理商管理表: {SHEET_NAMES['agents']}")
+                
+                # 从existing_sheets中移除，以便后续创建新表
+                existing_sheets.remove(SHEET_NAMES['agents'])
+            except Exception as e:
+                logger.error(f"❌ 删除代理商管理表失败: {e}")
+        
         # 创建缺失的工作表（只创建可见的工作表）
         for sheet_key, sheet_name in visible_sheets.items():
             if sheet_name not in existing_sheets:
@@ -164,6 +180,21 @@ class GoogleSheetsManager:
                     worksheet.append_row(EXPENSES_HEADERS)
                 elif sheet_key == 'agents':
                     worksheet.append_row(AGENTS_HEADERS)
+                    
+                    # 如果有备份数据，恢复数据（只保留Name、IC和Phone三列）
+                    if 'agents_data' in locals():
+                        for agent in agents_data:
+                            try:
+                                # 只添加需要的三列数据
+                                row_data = [
+                                    agent.get('Name', ''),
+                                    agent.get('IC', ''),  # 使用IC字段
+                                    agent.get('Phone', '')
+                                ]
+                                worksheet.append_row(row_data)
+                            except Exception as e:
+                                logger.error(f"❌ 恢复代理商数据失败: {e}")
+                                
                 elif sheet_key == 'suppliers':
                     worksheet.append_row(SUPPLIERS_HEADERS)
                 
@@ -591,5 +622,58 @@ class GoogleSheetsManager:
             logger.error(f"❌ 生成月度报表失败: {e}")
             return {}
 
+    def update_agents_worksheet(self):
+        """手动更新代理商管理表的表头结构"""
+        try:
+            # 检查表是否存在
+            existing_sheets = [ws.title for ws in self.spreadsheet.worksheets()]
+            if SHEET_NAMES['agents'] not in existing_sheets:
+                logger.error(f"❌ 代理商管理表不存在: {SHEET_NAMES['agents']}")
+                return False
+            
+            # 先备份现有数据
+            agents_ws = self.spreadsheet.worksheet(SHEET_NAMES['agents'])
+            agents_data = agents_ws.get_all_records()
+            
+            # 删除旧表
+            self.spreadsheet.del_worksheet(agents_ws)
+            logger.info(f"✅ 删除旧的代理商管理表: {SHEET_NAMES['agents']}")
+            
+            # 创建新表
+            worksheet = self.spreadsheet.add_worksheet(
+                title=SHEET_NAMES['agents'], rows=1000, cols=20
+            )
+            
+            # 添加新表头
+            worksheet.append_row(AGENTS_HEADERS)
+            logger.info(f"✅ 创建新的代理商管理表: {SHEET_NAMES['agents']}")
+            
+            # 恢复数据（只保留Name、IC和Phone三列）
+            for agent in agents_data:
+                try:
+                    # 只添加需要的三列数据
+                    row_data = [
+                        agent.get('Name', ''),
+                        agent.get('IC', ''),  # 使用IC字段
+                        agent.get('Phone', '')
+                    ]
+                    worksheet.append_row(row_data)
+                except Exception as e:
+                    logger.error(f"❌ 恢复代理商数据失败: {e}")
+            
+            logger.info(f"✅ 成功更新代理商管理表结构")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ 更新代理商管理表失败: {e}")
+            return False
+
 # 创建全局实例
 sheets_manager = GoogleSheetsManager()
+
+# 立即更新代理商管理表结构
+try:
+    sheets_manager.update_agents_worksheet()
+    logger.info("✅ 已执行代理商管理表结构更新")
+except Exception as e:
+    logger.error(f"❌ 执行代理商管理表结构更新失败: {e}")
