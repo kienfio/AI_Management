@@ -441,12 +441,12 @@ async def show_agent_selection(update: Update, context: ContextTypes.DEFAULT_TYP
         
         if not agents:
             # 如果没有代理商数据，显示提示信息
-            keyboard = [[InlineKeyboardButton("⚙️ 创建代理商", callback_data="setting_create_agent")],
-                        [InlineKeyboardButton("❌ 取消", callback_data="back_main")]]
+            keyboard = [[InlineKeyboardButton("⚙️ Create Agent", callback_data="setting_create_agent")],
+                        [InlineKeyboardButton("❌ Cancel", callback_data="back_main")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await update.message.reply_text(
-                "⚠️ <b>未找到代理商数据</b>\n\n请先创建代理商后再使用此功能。",
+                "⚠️ <b>No agents found</b>\n\nPlease create an agent first.",
                 parse_mode=ParseMode.HTML,
                 reply_markup=reply_markup
             )
@@ -466,7 +466,7 @@ async def show_agent_selection(update: Update, context: ContextTypes.DEFAULT_TYP
                 keyboard.append([InlineKeyboardButton(f"🤝 {display_text}", callback_data=f"agent_{name}_{commission}")])
         
         # 添加取消按钮
-        keyboard.append([InlineKeyboardButton("❌ 取消", callback_data="back_main")])
+        keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="back_main")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         # 显示佣金信息
@@ -475,10 +475,10 @@ async def show_agent_selection(update: Update, context: ContextTypes.DEFAULT_TYP
         commission_rate = context.user_data.get('commission_rate', 0) * 100
         
         message = f"""
-💰 <b>总金额:</b> RM{amount:,.2f}
-💵 <b>佣金:</b> RM{commission:,.2f} ({commission_rate:.1f}%)
+💰 <b>Total Amount:</b> RM{amount:,.2f}
+💵 <b>Commission:</b> RM{commission:,.2f} ({commission_rate:.1f}%)
 
-🤝 <b>请选择代理商:</b>
+🤝 <b>Please select an agent:</b>
 """
         
         await update.message.reply_text(
@@ -493,7 +493,7 @@ async def show_agent_selection(update: Update, context: ContextTypes.DEFAULT_TYP
     except Exception as e:
         logger.error(f"获取代理商列表失败: {e}")
         await update.message.reply_text(
-            "❌ <b>获取代理商数据失败</b>\n\n请稍后再试。",
+            "❌ <b>Failed to get agent list</b>\n\nPlease try again later.",
             parse_mode=ParseMode.HTML
         )
         return ConversationHandler.END
@@ -1875,7 +1875,7 @@ async def setting_ic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         agent_data = {
             'name': name,
             'ic': ic,
-            'status': '激活'
+            'status': 'Active'  # 修改为英文状态
         }
         
         sheets_manager.add_agent(agent_data)
