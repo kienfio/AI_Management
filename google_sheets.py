@@ -424,16 +424,24 @@ class GoogleSheetsManager:
             if not worksheet:
                 return False
             
+            # 获取名称，兼容'name'和'姓名'两种字段名
+            name = data.get('name', '')
+            if not name:
+                name = data.get('姓名', '')
+                if not name:
+                    logger.error("负责人姓名不能为空")
+                    return False
+            
             row_data = [
-                data.get('name', ''),
-                data.get('contact', ''),
-                data.get('phone', ''),
-                data.get('department', ''),
-                data.get('status', '激活')
+                name,  # 姓名
+                data.get('contact', data.get('联系人', '')),
+                data.get('phone', data.get('电话', '')),
+                data.get('department', data.get('部门', '')),
+                data.get('status', data.get('状态', '激活'))
             ]
             
             worksheet.append_row(row_data)
-            logger.info(f"✅ 负责人添加成功: {data.get('name')}")
+            logger.info(f"✅ 负责人添加成功: {name}")
             return True
             
         except Exception as e:
@@ -449,10 +457,29 @@ class GoogleSheetsManager:
             
             records = worksheet.get_all_records()
             
-            if active_only:
-                return [r for r in records if r.get('状态') == '激活']
+            # 处理记录，确保每条记录都有'姓名'字段
+            processed_records = []
+            for record in records:
+                # 如果记录中有'姓名'字段，直接添加
+                if '姓名' in record:
+                    # 添加name字段作为姓名字段的别名
+                    record['name'] = record['姓名']
+                    processed_records.append(record)
+                # 如果没有'姓名'字段但有'name'字段，添加'姓名'字段
+                elif 'name' in record:
+                    record['姓名'] = record['name']
+                    processed_records.append(record)
             
-            return records
+            if active_only:
+                # 筛选激活状态的记录，兼容'状态'和'status'字段
+                active_records = []
+                for r in processed_records:
+                    status = r.get('状态', r.get('status', ''))
+                    if status == '激活':
+                        active_records.append(r)
+                return active_records
+            
+            return processed_records
             
         except Exception as e:
             logger.error(f"❌ 获取负责人列表失败: {e}")
