@@ -1709,6 +1709,7 @@ def register_handlers(application):
     application.add_handler(CommandHandler("cancel", cancel_command))
     application.add_handler(CommandHandler("Setting", setting_command))
     application.add_handler(CommandHandler("SaleInvoice", sale_invoice_command))
+    application.add_handler(CommandHandler("UpdateAgents", update_agents_command))  # 添加更新代理商管理表的命令
     
     # 回调查询处理器 (放在会话处理器之后)
     application.add_handler(CallbackQueryHandler(sales_callback_handler, pattern='^sales_'))
@@ -2267,3 +2268,26 @@ async def menu_setting_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         reply_markup=reply_markup
     )
     return SETTING_CATEGORY
+
+async def update_agents_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """处理 /UpdateAgents 命令 - 更新代理商管理表结构"""
+    try:
+        sheets_manager = SheetsManager()
+        result = sheets_manager.update_agents_worksheet()
+        
+        if result:
+            await update.message.reply_text(
+                "✅ 代理商管理表结构已成功更新，现在只显示Name、IC和Phone三列。",
+                parse_mode=ParseMode.HTML
+            )
+        else:
+            await update.message.reply_text(
+                "❌ 更新代理商管理表结构失败，请查看日志了解详情。",
+                parse_mode=ParseMode.HTML
+            )
+    except Exception as e:
+        logger.error(f"❌ 执行更新代理商管理表命令失败: {e}")
+        await update.message.reply_text(
+            "❌ 更新代理商管理表时发生错误，请查看日志了解详情。",
+            parse_mode=ParseMode.HTML
+        )
