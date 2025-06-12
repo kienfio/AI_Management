@@ -313,10 +313,49 @@ class GoogleSheetsManager:
             
             records = worksheet.get_all_records()
             
-            if active_only:
-                return [r for r in records if r.get('状态') == '激活']
+            # 处理记录，确保每条记录都有'姓名'和'佣金比例'字段
+            processed_records = []
+            for record in records:
+                # 处理姓名字段
+                if '姓名' in record:
+                    # 添加name字段作为姓名字段的别名
+                    record['name'] = record['姓名']
+                elif 'name' in record:
+                    record['姓名'] = record['name']
+                
+                # 处理佣金比例字段
+                if '佣金比例' in record:
+                    # 尝试将佣金比例转换为浮点数
+                    try:
+                        if isinstance(record['佣金比例'], str) and '%' in record['佣金比例']:
+                            # 如果是百分比字符串，转换为小数
+                            record['commission_rate'] = float(record['佣金比例'].replace('%', '')) / 100
+                        else:
+                            record['commission_rate'] = float(record['佣金比例'])
+                    except (ValueError, TypeError):
+                        record['commission_rate'] = record['佣金比例']
+                elif 'commission_rate' in record:
+                    try:
+                        if isinstance(record['commission_rate'], str) and '%' in record['commission_rate']:
+                            # 如果是百分比字符串，转换为小数
+                            record['佣金比例'] = float(record['commission_rate'].replace('%', '')) / 100
+                        else:
+                            record['佣金比例'] = float(record['commission_rate'])
+                    except (ValueError, TypeError):
+                        record['佣金比例'] = record['commission_rate']
+                
+                processed_records.append(record)
             
-            return records
+            if active_only:
+                # 筛选激活状态的记录，兼容'状态'和'status'字段
+                active_records = []
+                for r in processed_records:
+                    status = r.get('状态', r.get('status', ''))
+                    if status == '激活':
+                        active_records.append(r)
+                return active_records
+            
+            return processed_records
             
         except Exception as e:
             logger.error(f"❌ 获取代理商列表失败: {e}")
