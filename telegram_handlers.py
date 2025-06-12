@@ -1310,6 +1310,8 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     query = update.callback_query
     await query.answer()
     
+    logger.info(f"处理回调查询: {query.data}")
+    
     # 主菜单回调
     if query.data == "back_main":
         try:
@@ -1359,6 +1361,7 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     
     # 设置相关回调
     elif query.data.startswith("setting_create_"):
+        logger.info(f"检测到设置创建回调: {query.data}，重定向到 setting_category_handler")
         return await setting_category_handler(update, context)
     
     # 各功能菜单回调
@@ -1420,6 +1423,7 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     
     # 默认返回主菜单
     else:
+        logger.warning(f"未处理的回调查询: {query.data}")
         await start_command(update, context)
         return ConversationHandler.END
 
@@ -1629,17 +1633,20 @@ def register_handlers(application):
     # 初始化对话处理器
     get_conversation_handlers()
     
-    # 添加会话处理器
-    for conversation in [sales_conversation, expenses_conversation, report_conversation, setting_conversation]:
-        if conversation:
-            application.add_handler(conversation)
-    
     # 基础命令处理器
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("cancel", cancel_command))
     application.add_handler(CommandHandler("Setting", setting_command))
     application.add_handler(CommandHandler("SaleInvoice", sale_invoice_command))
+    
+    # 添加专门处理 setting_create_ 模式的回调处理器，优先级高于会话处理器
+    application.add_handler(CallbackQueryHandler(setting_category_handler, pattern='^setting_create_'))
+    
+    # 添加会话处理器
+    for conversation in [sales_conversation, expenses_conversation, report_conversation, setting_conversation]:
+        if conversation:
+            application.add_handler(conversation)
     
     # 回调查询处理器 (放在会话处理器之后)
     application.add_handler(CallbackQueryHandler(sales_callback_handler, pattern='^sales_'))
@@ -1687,6 +1694,7 @@ async def setting_category_handler(update: Update, context: ContextTypes.DEFAULT
     
     category_data = query.data.replace("setting_create_", "")
     context.user_data['setting_category'] = category_data
+    logger.info(f"设置类别选择: {category_data}")
     
     category_names = {
         "agent": "Agent",
@@ -1934,6 +1942,7 @@ async def sale_invoice_command(update: Update, context: ContextTypes.DEFAULT_TYP
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             message = "⚠️ <b>No person in charge found</b>\n\nPlease create a person in charge first."
+            logger.info(f"未找到负责人数据，显示创建按钮 setting_create_pic")
             
             if is_callback:
                 await update.callback_query.edit_message_text(
@@ -1947,7 +1956,7 @@ async def sale_invoice_command(update: Update, context: ContextTypes.DEFAULT_TYP
                     parse_mode=ParseMode.HTML,
                     reply_markup=reply_markup
                 )
-            # 不结束对话，等待回调处理
+            # 不要结束对话，让回调处理器有机会处理 setting_create_pic 回调
             return ConversationHandler.END
             
         # 创建负责人选择按钮
