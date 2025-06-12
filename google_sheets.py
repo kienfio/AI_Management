@@ -331,7 +331,7 @@ class GoogleSheetsManager:
             records = worksheet.get_all_records()
             
             if active_only:
-                return [r for r in records if r.get('Status') == '激活']
+                return [r for r in records if r.get('Status') == 'Active']
             
             return records
             
@@ -377,7 +377,7 @@ class GoogleSheetsManager:
             records = worksheet.get_all_records()
             
             if active_only:
-                return [r for r in records if r.get('Status') == '激活']
+                return [r for r in records if r.get('Status') == 'Active']
             
             return records
             
@@ -422,7 +422,7 @@ class GoogleSheetsManager:
             records = worksheet.get_all_records()
             
             if active_only:
-                return [r for r in records if r.get('Status') == '激活']
+                return [r for r in records if r.get('Status') == 'Active']
             
             return records
             
@@ -467,7 +467,7 @@ class GoogleSheetsManager:
             records = worksheet.get_all_records()
             
             if active_only:
-                return [r for r in records if r.get('Status') == '激活']
+                return [r for r in records if r.get('Status') == 'Active']
             
             return records
             
