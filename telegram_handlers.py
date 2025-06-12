@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # ====================================
 
 # 销售记录状态
-SALES_PERSON, SALES_AMOUNT, SALES_CLIENT, SALES_COMMISSION_TYPE, SALES_COMMISSION_PERCENT, SALES_COMMISSION_AMOUNT, SALES_AGENT_SELECT, SALES_CONFIRM = range(8)
+SALES_PERSON, SALES_AMOUNT, SALES_CLIENT, SALES_BILL_TO, SALES_COMMISSION_TYPE, SALES_COMMISSION_PERCENT, SALES_COMMISSION_AMOUNT, SALES_AGENT_SELECT, SALES_CONFIRM = range(9)
 
 # 费用管理状态
 COST_TYPE, COST_SUPPLIER, COST_AMOUNT, COST_DESC, COST_RECEIPT, COST_CONFIRM = range(6)
@@ -252,6 +252,24 @@ async def sales_client_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     client_type = "Company" if query.data == "client_company" else "Agent"
     context.user_data['sales_client'] = client_type
     
+    # 无论选择哪种客户类型，都进入Bill to步骤
+    keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_main")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        f"🎯 <b>Client Type:</b> {client_type}\n\n📝 <b>Enter Bill to (who is receiving the invoice):</b>",
+        parse_mode=ParseMode.HTML,
+        reply_markup=reply_markup
+    )
+    return SALES_BILL_TO
+
+async def sales_bill_to_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理账单接收方输入"""
+    bill_to = update.message.text.strip()
+    context.user_data['sales_bill_to'] = bill_to
+    
+    client_type = context.user_data['sales_client']
+    
     # 如果选择的是公司，直接进入确认步骤，不计算佣金
     if client_type == "Company":
         # 公司类型不需要计算佣金
@@ -276,7 +294,7 @@ async def sales_client_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                         [InlineKeyboardButton("❌ Cancel", callback_data="back_main")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            await query.edit_message_text(
+            await update.message.reply_text(
                 "⚠️ <b>No agents found</b>\n\nPlease create an agent first.",
                 parse_mode=ParseMode.HTML,
                 reply_markup=reply_markup
@@ -295,7 +313,7 @@ async def sales_client_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="back_main")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await query.edit_message_text(
+        await update.message.reply_text(
             "🤝 <b>Select Agent:</b>",
             parse_mode=ParseMode.HTML,
             reply_markup=reply_markup
@@ -306,7 +324,7 @@ async def sales_client_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         
     except Exception as e:
         logger.error(f"获取代理商列表失败: {e}")
-        await query.edit_message_text(
+        await update.message.reply_text(
             "❌ <b>Failed to get agent list</b>\n\nPlease try again later.",
             parse_mode=ParseMode.HTML
         )
@@ -500,6 +518,7 @@ async def show_sales_confirmation(update: Update, context: ContextTypes.DEFAULT_
     # 获取数据
     amount = context.user_data['sales_amount']
     client_type = context.user_data['sales_client']
+    bill_to = context.user_data.get('sales_bill_to', '')
     commission = context.user_data['sales_commission']
     commission_rate = context.user_data.get('commission_rate', 0) * 100
     person = context.user_data['sales_person']
@@ -519,6 +538,7 @@ async def show_sales_confirmation(update: Update, context: ContextTypes.DEFAULT_
 👤 <b>Person in Charge:</b> {person}
 💰 <b>Amount:</b> RM{amount:,.2f}
 🎯 <b>Client Type:</b> {client_display}
+📝 <b>Bill to:</b> {bill_to}
 {commission_display}
 
 <b>Please confirm the information:</b>
@@ -550,6 +570,7 @@ async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
         # 准备数据
         client_type = context.user_data['sales_client']
+        bill_to = context.user_data.get('sales_bill_to', '')
         agent_info = ""
         if client_type == "Agent" and 'sales_agent' in context.user_data:
             agent_info = context.user_data['sales_agent']
@@ -563,6 +584,13 @@ async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         elif commission_type == 'fixed':
             commission_note = "Fixed commission amount"
         
+        # 构建备注，包含Bill to信息
+        notes = f"Bill to: {bill_to}"
+        if agent_info:
+            notes += f", Agent: {agent_info}"
+        if commission_note:
+            notes += f", {commission_note}"
+        
         sales_data = {
             'date': datetime.now().strftime('%Y-%m-%d %H:%M'),
             'person': context.user_data['sales_person'],
@@ -570,7 +598,7 @@ async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             'client_type': client_type,
             'commission_rate': context.user_data.get('commission_rate', 0),
             'commission_amount': context.user_data['sales_commission'],
-            'notes': f"Agent: {agent_info}" + (f", {commission_note}" if commission_note else "")
+            'notes': notes
         }
         
         sheets_manager.add_sales_record(sales_data)
@@ -585,9 +613,11 @@ async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 👤 <b>Person in Charge:</b> {person}
 💰 <b>Amount:</b> RM{amount:,.2f}
+📝 <b>Bill to:</b> {bill_to}
 💵 <b>Commission:</b> RM{commission:,.2f}
 🕒 <b>Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M')}
 """
+        
         
         keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="back_main")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1612,6 +1642,7 @@ def get_conversation_handlers():
             ],
             SALES_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, sales_amount_handler)],
             SALES_CLIENT: [CallbackQueryHandler(sales_client_handler, pattern="^client_")],
+            SALES_BILL_TO: [MessageHandler(filters.TEXT & ~filters.COMMAND, sales_bill_to_handler)],
             SALES_COMMISSION_TYPE: [CallbackQueryHandler(sales_commission_type_handler, pattern="^commission_")],
             SALES_COMMISSION_PERCENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, sales_commission_percent_handler)],
             SALES_COMMISSION_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, sales_commission_amount_handler)],
@@ -1710,6 +1741,7 @@ def register_handlers(application):
     application.add_handler(CommandHandler("Setting", setting_command))
     application.add_handler(CommandHandler("SaleInvoice", sale_invoice_command))
     application.add_handler(CommandHandler("UpdateAgents", update_agents_command))  # 添加更新代理商管理表的命令
+    application.add_handler(CommandHandler("UpdatePICs", update_pics_command))  # 添加更新负责人管理表的命令
     
     # 回调查询处理器 (放在会话处理器之后)
     application.add_handler(CallbackQueryHandler(sales_callback_handler, pattern='^sales_'))
@@ -2289,5 +2321,28 @@ async def update_agents_command(update: Update, context: ContextTypes.DEFAULT_TY
         logger.error(f"❌ 执行更新代理商管理表命令失败: {e}")
         await update.message.reply_text(
             "❌ 更新代理商管理表时发生错误，请查看日志了解详情。",
+            parse_mode=ParseMode.HTML
+        )
+
+async def update_pics_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """处理 /UpdatePICs 命令 - 更新负责人管理表结构"""
+    try:
+        sheets_manager = SheetsManager()
+        result = sheets_manager.update_pic_worksheet()
+        
+        if result:
+            await update.message.reply_text(
+                "✅ 负责人管理表结构已成功更新。",
+                parse_mode=ParseMode.HTML
+            )
+        else:
+            await update.message.reply_text(
+                "❌ 更新负责人管理表结构失败，请查看日志了解详情。",
+                parse_mode=ParseMode.HTML
+            )
+    except Exception as e:
+        logger.error(f"❌ 执行更新负责人管理表命令失败: {e}")
+        await update.message.reply_text(
+            "❌ 更新负责人管理表时发生错误，请查看日志了解详情。",
             parse_mode=ParseMode.HTML
         )
