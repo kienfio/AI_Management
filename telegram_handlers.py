@@ -1839,7 +1839,7 @@ async def setting_name_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             # 创建一个简单的数据结构，类似于其他添加方法
             setting_data = {
                 'name': name,
-                'status': '激活'
+                'status': 'Active'  # 修改为英文状态
             }
             
             # 使用已有的方法添加数据
@@ -1927,7 +1927,7 @@ async def setting_type_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 'phone': '',
                 'email': '',
                 'products': type_value,
-                'status': '激活'
+                'status': 'Active'  # 修改为英文状态
             }
             sheets_manager.add_supplier(data)
         elif category == "worker":
@@ -1936,7 +1936,7 @@ async def setting_type_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 'contact': ic,
                 'phone': '',
                 'position': type_value,
-                'status': '激活'
+                'status': 'Active'  # 修改为英文状态
             }
             sheets_manager.add_worker(data)
         elif category == "pic":
@@ -1945,7 +1945,7 @@ async def setting_type_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 'contact': ic,
                 'phone': '',
                 'department': type_value,
-                'status': '激活'
+                'status': 'Active'  # 修改为英文状态
             }
             sheets_manager.add_pic(data)
         
@@ -1988,8 +1988,11 @@ async def setting_type_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         return ConversationHandler.END
         
     except Exception as e:
-        logger.error(f"保存设置失败: {e}")
-        await update.message.reply_text("❌ <b>Failed to save</b>\n\nPlease try again later.", parse_mode=ParseMode.HTML)
+        logger.error(f"添加{category}失败: {e}")
+        await update.message.reply_text(
+            f"❌ 添加 {category_names.get(category, 'Item')} 失败，请重试",
+            parse_mode=ParseMode.HTML
+        )
         return ConversationHandler.END
 
 async def sale_invoice_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -2007,11 +2010,11 @@ async def sale_invoice_command(update: Update, context: ContextTypes.DEFAULT_TYP
         
         if not pics:
             # 如果没有负责人数据，显示提示信息
-            keyboard = [[InlineKeyboardButton("⚙️ 创建负责人", callback_data="setting_create_pic")],
-                        [InlineKeyboardButton("❌ 取消", callback_data="back_main")]]
+            keyboard = [[InlineKeyboardButton("⚙️ Create Person in Charge", callback_data="setting_create_pic")],
+                        [InlineKeyboardButton("❌ Cancel", callback_data="back_main")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            message = "⚠️ <b>未找到负责人数据</b>\n\n请先创建负责人后再使用此功能。"
+            message = "⚠️ <b>No Person in Charge found</b>\n\nPlease create one first."
             
             if is_callback:
                 await update.callback_query.edit_message_text(
@@ -2135,19 +2138,16 @@ async def cost_list_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
 
 async def setting_rate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理代理商佣金比例输入"""
-    rate_input = update.message.text.strip()
+    """处理佣金比例输入"""
+    rate_text = update.message.text.strip()
     
     try:
-        # 尝试将输入转换为浮点数
-        rate = float(rate_input.replace('%', '')) / 100
-        if rate < 0 or rate > 1:
-            await update.message.reply_text("⚠️ <b>Invalid rate</b>\n\nPlease enter a percentage between 0-100%.", parse_mode=ParseMode.HTML)
-            return SETTING_RATE
-            
+        # 处理百分比格式，如果有百分号则去掉
+        rate_text = rate_text.replace('%', '')
+        rate = float(rate_text) / 100  # 转换为小数
         context.user_data['setting_rate'] = rate
         
-        # 获取之前收集的数据
+        # 获取之前保存的数据
         category = context.user_data.get('setting_category')
         name = context.user_data.get('setting_name')
         ic = context.user_data.get('setting_ic', '')
@@ -2164,7 +2164,7 @@ async def setting_rate_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                     'phone': '',
                     'email': '',
                     'commission_rate': rate,
-                    'status': '激活'
+                    'status': 'Active'  # 修改为英文状态
                 }
                 sheets_manager.add_agent(data)
             
@@ -2209,12 +2209,18 @@ async def setting_rate_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             return ConversationHandler.END
             
         except Exception as e:
-            logger.error(f"保存设置失败: {e}")
-            await update.message.reply_text("❌ <b>Failed to save</b>\n\nPlease try again later.", parse_mode=ParseMode.HTML)
+            logger.error(f"添加{category}失败: {e}")
+            await update.message.reply_text(
+                f"❌ 添加 {category_name} 失败，请重试",
+                parse_mode=ParseMode.HTML
+            )
             return ConversationHandler.END
-            
+    
     except ValueError:
-        await update.message.reply_text("⚠️ <b>Invalid format</b>\n\nPlease enter a valid percentage (e.g. 5 or 5%).", parse_mode=ParseMode.HTML)
+        # 如果输入的不是有效的数字
+        await update.message.reply_text(
+            "⚠️ Please enter a valid number (e.g. 5 or 5%)"
+        )
         return SETTING_RATE
 
 async def sales_agent_select_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
