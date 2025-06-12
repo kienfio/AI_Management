@@ -286,15 +286,23 @@ async def sales_client_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         # 创建代理商选择按钮
         keyboard = []
         for agent in agents:
-            # 使用姓名作为按钮文本
-            name = agent.get('姓名', '')
-            commission = agent.get('佣金比例', '')
+            # 使用姓名作为按钮文本，兼容'姓名'和'name'字段
+            name = agent.get('姓名', agent.get('name', ''))
+            
+            # 获取佣金比例，兼容'佣金比例'和'commission_rate'字段
+            commission_rate = agent.get('佣金比例', agent.get('commission_rate', ''))
+            if isinstance(commission_rate, float):
+                # 如果是浮点数，转换为百分比字符串
+                commission_display = f"{commission_rate*100:.1f}%"
+            else:
+                commission_display = str(commission_rate)
+            
             display_text = f"{name}"
-            if commission:
-                display_text += f" ({commission})"
+            if commission_display:
+                display_text += f" ({commission_display})"
                 
             if name:
-                keyboard.append([InlineKeyboardButton(f"🤝 {display_text}", callback_data=f"agent_{name}_{commission}")])
+                keyboard.append([InlineKeyboardButton(f"🤝 {display_text}", callback_data=f"agent_{name}_{commission_rate}")])
         
         # 添加取消按钮
         keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="back_main")])
@@ -305,6 +313,8 @@ async def sales_client_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             parse_mode=ParseMode.HTML,
             reply_markup=reply_markup
         )
+        
+        logger.info(f"显示代理商选择界面，找到 {len(agents)} 个代理商")
         
         # 返回代理商选择状态
         return SALES_AGENT_SELECT
@@ -1539,7 +1549,10 @@ def get_conversation_handlers():
             ],
             SALES_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, sales_amount_handler)],
             SALES_CLIENT: [CallbackQueryHandler(sales_client_handler, pattern="^client_")],
-            SALES_COMMISSION_TYPE: [CallbackQueryHandler(sales_commission_type_handler, pattern="^commission_")],
+            SALES_COMMISSION_TYPE: [
+                CallbackQueryHandler(sales_commission_type_handler, pattern="^commission_"),
+                CallbackQueryHandler(use_default_commission_handler, pattern="^use_default_commission_")
+            ],
             SALES_COMMISSION_PERCENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, sales_commission_percent_handler)],
             SALES_COMMISSION_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, sales_commission_amount_handler)],
             SALES_AGENT_SELECT: [CallbackQueryHandler(sales_agent_select_handler, pattern="^agent_")],
@@ -2149,23 +2162,50 @@ async def sales_agent_select_handler(update: Update, context: ContextTypes.DEFAU
             
             # 获取代理商默认佣金比例（如果有）
             default_commission = ""
+            default_commission_rate = 0
             if len(parts) >= 2:
-                default_commission = parts[1]
+                try:
+                    # 尝试将佣金比例转换为数字
+                    commission_str = parts[1]
+                    # 处理可能的百分比字符串
+                    if isinstance(commission_str, str) and '%' in commission_str:
+                        default_commission_rate = float(commission_str.replace('%', '')) / 100
+                    else:
+                        default_commission_rate = float(commission_str)
+                    
+                    # 格式化显示
+                    default_commission = f"{default_commission_rate*100:.1f}%"
+                except (ValueError, TypeError):
+                    logger.error(f"无法解析佣金比例: {parts[1]}")
+                    default_commission = parts[1]
             
             # 显示佣金计算方式选择界面
             amount = context.user_data['sales_amount']
+            
+            # 如果有默认佣金比例，预先计算佣金金额
+            default_commission_amount = ""
+            if default_commission_rate > 0:
+                commission_amount = amount * default_commission_rate
+                default_commission_amount = f"💵 <b>Default Commission Amount:</b> RM{commission_amount:,.2f}"
             
             keyboard = [
                 [InlineKeyboardButton("💯 Set Commission Percentage", callback_data="commission_percent")],
                 [InlineKeyboardButton("💰 Enter Fixed Commission Amount", callback_data="commission_amount")],
                 [InlineKeyboardButton("❌ Cancel", callback_data="back_main")]
             ]
+            
+            # 如果有默认佣金比例，添加使用默认佣金的按钮
+            if default_commission_rate > 0:
+                keyboard.insert(0, [InlineKeyboardButton(f"✅ Use Default Rate ({default_commission})", 
+                                                       callback_data=f"use_default_commission_{default_commission_rate}")])
+            
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             message = f"""
 🤝 <b>Agent:</b> {agent_name}
 💰 <b>Amount:</b> RM{amount:,.2f}
 {f"💵 <b>Default Commission Rate:</b> {default_commission}" if default_commission else ""}
+{default_commission_amount if default_commission_amount else ""}
 
 <b>Please select commission calculation method:</b>
 """
@@ -2224,3 +2264,34 @@ async def menu_setting_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         reply_markup=reply_markup
     )
     return SETTING_CATEGORY
+
+async def use_default_commission_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理使用默认佣金比例的回调"""
+    query = update.callback_query
+    await query.answer()
+    
+    # 从回调数据中提取佣金比例
+    # 格式: use_default_commission_{rate}
+    try:
+        rate_str = query.data.replace("use_default_commission_", "")
+        rate = float(rate_str)
+        
+        # 计算佣金
+        amount = context.user_data['sales_amount']
+        commission = amount * rate
+        
+        # 保存数据
+        context.user_data['commission_rate'] = rate
+        context.user_data['sales_commission'] = commission
+        context.user_data['commission_type'] = 'default'
+        
+        # 跳转到确认界面
+        return await show_sales_confirmation(update, context)
+        
+    except ValueError as e:
+        logger.error(f"解析默认佣金比例失败: {e}")
+        await query.edit_message_text(
+            "❌ <b>Error processing commission rate</b>\n\nPlease try again.",
+            parse_mode=ParseMode.HTML
+        )
+        return ConversationHandler.END
