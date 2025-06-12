@@ -140,30 +140,61 @@ class GoogleSheetsManager:
     
     def _ensure_worksheets_exist(self):
         """确保所有必需的工作表存在"""
-        existing_sheets = [ws.title for ws in self.spreadsheet.worksheets()]
-        
-        # 创建缺失的工作表
-        for sheet_key, sheet_name in SHEET_NAMES.items():
-            if sheet_name not in existing_sheets:
-                worksheet = self.spreadsheet.add_worksheet(
-                    title=sheet_name, rows=1000, cols=20
-                )
-                
-                # 添加表头
-                if sheet_key == 'sales':
-                    worksheet.append_row(SALES_HEADERS)
-                elif sheet_key == 'expenses':
-                    worksheet.append_row(EXPENSES_HEADERS)
-                elif sheet_key == 'agents':
-                    worksheet.append_row(AGENTS_HEADERS)
-                elif sheet_key == 'suppliers':
-                    worksheet.append_row(SUPPLIERS_HEADERS)
-                elif sheet_key == 'workers':
-                    worksheet.append_row(WORKERS_HEADERS)
-                elif sheet_key == 'pic':
-                    worksheet.append_row(PICS_HEADERS)
-                
-                logger.info(f"✅ 创建工作表: {sheet_name}")
+        try:
+            logger.info("开始检查和创建必要的工作表")
+            existing_sheets = [ws.title for ws in self.spreadsheet.worksheets()]
+            logger.info(f"现有工作表: {existing_sheets}")
+            
+            # 创建缺失的工作表
+            for sheet_key, sheet_name in SHEET_NAMES.items():
+                if sheet_name not in existing_sheets:
+                    logger.info(f"创建工作表: {sheet_name}")
+                    try:
+                        worksheet = self.spreadsheet.add_worksheet(
+                            title=sheet_name, rows=1000, cols=20
+                        )
+                        
+                        # 添加表头
+                        if sheet_key == 'sales':
+                            worksheet.append_row(SALES_HEADERS)
+                        elif sheet_key == 'expenses':
+                            worksheet.append_row(EXPENSES_HEADERS)
+                        elif sheet_key == 'agents':
+                            # 使用英文表头
+                            worksheet.append_row(['Name', 'IC', 'Phone', 'Email', 'Commission Rate', 'Status'])
+                        elif sheet_key == 'suppliers':
+                            worksheet.append_row(SUPPLIERS_HEADERS)
+                        elif sheet_key == 'workers':
+                            worksheet.append_row(WORKERS_HEADERS)
+                        elif sheet_key == 'pic':
+                            worksheet.append_row(PICS_HEADERS)
+                        
+                        logger.info(f"✅ 创建工作表: {sheet_name}")
+                    except Exception as ws_error:
+                        logger.error(f"创建工作表失败 {sheet_name}: {ws_error}")
+                else:
+                    # 检查已存在的工作表是否有表头
+                    try:
+                        worksheet = self.get_worksheet(sheet_name)
+                        if worksheet:
+                            headers = worksheet.row_values(1)
+                            
+                            # 如果是代理商表且没有表头或表头不正确
+                            if sheet_key == 'agents' and (not headers or 'Name' not in headers):
+                                logger.info(f"更新代理商表头")
+                                # 检查是否有数据
+                                all_values = worksheet.get_all_values()
+                                if not all_values:
+                                    # 如果没有数据，直接添加表头
+                                    worksheet.append_row(['Name', 'IC', 'Phone', 'Email', 'Commission Rate', 'Status'])
+                                else:
+                                    # 如果有数据，更新第一行
+                                    worksheet.update('A1:F1', [['Name', 'IC', 'Phone', 'Email', 'Commission Rate', 'Status']])
+                    except Exception as header_error:
+                        logger.error(f"检查工作表表头失败 {sheet_name}: {header_error}")
+        except Exception as e:
+            logger.error(f"确保工作表存在时出错: {e}")
+            # 继续执行，不抛出异常
     
     def get_worksheet(self, sheet_name: str):
         """获取指定工作表"""
@@ -287,17 +318,52 @@ class GoogleSheetsManager:
             if not worksheet:
                 return False
             
-            row_data = [
-                data.get('name', ''),
-                data.get('contact', ''),
-                data.get('phone', ''),
-                data.get('email', ''),
-                data.get('commission_rate', 0),
-                data.get('status', '激活')
-            ]
+            # 获取表头
+            headers = worksheet.row_values(1)
+            logger.info(f"代理商表头: {headers}")
             
+            # 检查表头是否包含预期的字段
+            expected_headers = ['Name', 'IC', 'Phone']
+            missing_headers = [h for h in expected_headers if h not in headers]
+            
+            if missing_headers:
+                logger.warning(f"代理商表头缺少字段: {missing_headers}")
+                # 如果缺少必要的表头，尝试更新表头
+                if len(headers) == 0:
+                    logger.info("代理商表头为空，添加默认表头")
+                    worksheet.append_row(['Name', 'IC', 'Phone', 'Email', 'Commission Rate', 'Status'])
+                    headers = ['Name', 'IC', 'Phone', 'Email', 'Commission Rate', 'Status']
+            
+            # 准备数据
+            name = data.get('name', '')
+            ic = data.get('contact', '')
+            phone = data.get('phone', '')
+            email = data.get('email', '')
+            commission_rate = data.get('commission_rate', 0)
+            status = data.get('status', '激活')
+            
+            # 创建与表头匹配的数据行
+            row_data = []
+            for header in headers:
+                if header == 'Name':
+                    row_data.append(name)
+                elif header == 'IC':
+                    row_data.append(ic)
+                elif header == 'Phone':
+                    row_data.append(phone)
+                elif header == 'Email':
+                    row_data.append(email)
+                elif header in ['Commission Rate', '佣金比例']:
+                    row_data.append(commission_rate)
+                elif header in ['Status', '状态']:
+                    row_data.append(status)
+                else:
+                    # 对于未知的表头，添加空值
+                    row_data.append('')
+            
+            # 添加数据行
             worksheet.append_row(row_data)
-            logger.info(f"✅ 代理商添加成功: {data.get('name')}")
+            logger.info(f"✅ 代理商添加成功: {name}, 数据: {row_data}")
             return True
             
         except Exception as e:
