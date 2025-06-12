@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # ====================================
 
 # 销售记录状态
-SALES_PERSON, SALES_AMOUNT, SALES_CLIENT, SALES_BILL_TO, SALES_COMMISSION_TYPE, SALES_COMMISSION_PERCENT, SALES_COMMISSION_AMOUNT, SALES_AGENT_SELECT, SALES_CONFIRM = range(9)
+SALES_PERSON, SALES_AMOUNT, SALES_CLIENT, SALES_COMMISSION_TYPE, SALES_COMMISSION_PERCENT, SALES_COMMISSION_AMOUNT, SALES_AGENT_SELECT, SALES_CONFIRM = range(8)
 
 # 费用管理状态
 COST_TYPE, COST_SUPPLIER, COST_AMOUNT, COST_DESC, COST_RECEIPT, COST_CONFIRM = range(6)
@@ -252,24 +252,6 @@ async def sales_client_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     client_type = "Company" if query.data == "client_company" else "Agent"
     context.user_data['sales_client'] = client_type
     
-    # 无论选择哪种客户类型，都进入Bill to步骤
-    keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_main")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(
-        f"🎯 <b>Client Type:</b> {client_type}\n\n📝 <b>Enter Bill to (who is receiving the invoice):</b>",
-        parse_mode=ParseMode.HTML,
-        reply_markup=reply_markup
-    )
-    return SALES_BILL_TO
-
-async def sales_bill_to_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理账单接收方输入"""
-    bill_to = update.message.text.strip()
-    context.user_data['sales_bill_to'] = bill_to
-    
-    client_type = context.user_data['sales_client']
-    
     # 如果选择的是公司，直接进入确认步骤，不计算佣金
     if client_type == "Company":
         # 公司类型不需要计算佣金
@@ -284,12 +266,6 @@ async def sales_bill_to_handler(update: Update, context: ContextTypes.DEFAULT_TY
     
     # 如果选择的是代理商，先获取代理商列表
     try:
-        # 先发送加载提示
-        loading_message = await update.message.reply_text(
-            "⏳ <b>Loading Agent list...</b>",
-            parse_mode=ParseMode.HTML
-        )
-        
         # 获取代理商列表
         sheets_manager = SheetsManager()
         agents = sheets_manager.get_agents(active_only=True)
@@ -300,7 +276,7 @@ async def sales_bill_to_handler(update: Update, context: ContextTypes.DEFAULT_TY
                         [InlineKeyboardButton("❌ Cancel", callback_data="back_main")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            await loading_message.edit_text(
+            await query.edit_message_text(
                 "⚠️ <b>No agents found</b>\n\nPlease create an agent first.",
                 parse_mode=ParseMode.HTML,
                 reply_markup=reply_markup
@@ -310,16 +286,21 @@ async def sales_bill_to_handler(update: Update, context: ContextTypes.DEFAULT_TY
         # 创建代理商选择按钮
         keyboard = []
         for agent in agents:
-            # 使用姓名作为按钮文本 - 只显示名称
-            name = agent.get('Name', '')
+            # 使用姓名作为按钮文本
+            name = agent.get('姓名', '')
+            commission = agent.get('佣金比例', '')
+            display_text = f"{name}"
+            if commission:
+                display_text += f" ({commission})"
+                
             if name:
-                keyboard.append([InlineKeyboardButton(f"🤝 {name}", callback_data=f"agent_{name}_")])
+                keyboard.append([InlineKeyboardButton(f"🤝 {display_text}", callback_data=f"agent_{name}_{commission}")])
         
         # 添加取消按钮
         keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="back_main")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await loading_message.edit_text(
+        await query.edit_message_text(
             "🤝 <b>Select Agent:</b>",
             parse_mode=ParseMode.HTML,
             reply_markup=reply_markup
@@ -330,8 +311,8 @@ async def sales_bill_to_handler(update: Update, context: ContextTypes.DEFAULT_TY
         
     except Exception as e:
         logger.error(f"获取代理商列表失败: {e}")
-        await update.message.reply_text(
-            "❌ <b>Failed to get agent list</b>\n\nPlease try again later.",
+        await query.edit_message_text(
+            "❌ <b>Failed to get agent data</b>\n\nPlease try again later.",
             parse_mode=ParseMode.HTML
         )
         return ConversationHandler.END
@@ -460,12 +441,12 @@ async def show_agent_selection(update: Update, context: ContextTypes.DEFAULT_TYP
         
         if not agents:
             # 如果没有代理商数据，显示提示信息
-            keyboard = [[InlineKeyboardButton("⚙️ Create Agent", callback_data="setting_create_agent")],
-                        [InlineKeyboardButton("❌ Cancel", callback_data="back_main")]]
+            keyboard = [[InlineKeyboardButton("⚙️ 创建代理商", callback_data="setting_create_agent")],
+                        [InlineKeyboardButton("❌ 取消", callback_data="back_main")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await update.message.reply_text(
-                "⚠️ <b>No agents found</b>\n\nPlease create an agent first.",
+                "⚠️ <b>未找到代理商数据</b>\n\n请先创建代理商后再使用此功能。",
                 parse_mode=ParseMode.HTML,
                 reply_markup=reply_markup
             )
@@ -474,13 +455,13 @@ async def show_agent_selection(update: Update, context: ContextTypes.DEFAULT_TYP
         # 创建代理商选择按钮
         keyboard = []
         for agent in agents:
-            # 使用姓名作为按钮文本 - 只显示名称，不再显示佣金率
-            name = agent.get('Name', '')
+            # 使用姓名作为按钮文本
+            name = agent.get('姓名', '')
             if name:
-                keyboard.append([InlineKeyboardButton(f"🤝 {name}", callback_data=f"agent_{name}_")])
+                keyboard.append([InlineKeyboardButton(f"🤝 {name}", callback_data=f"agent_{name}")])
         
         # 添加取消按钮
-        keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="back_main")])
+        keyboard.append([InlineKeyboardButton("❌ 取消", callback_data="back_main")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         # 显示佣金信息
@@ -489,10 +470,10 @@ async def show_agent_selection(update: Update, context: ContextTypes.DEFAULT_TYP
         commission_rate = context.user_data.get('commission_rate', 0) * 100
         
         message = f"""
-💰 <b>Total Amount:</b> RM{amount:,.2f}
-💵 <b>Commission:</b> RM{commission:,.2f} ({commission_rate:.1f}%)
+💰 <b>总金额:</b> RM{amount:,.2f}
+💵 <b>佣金:</b> RM{commission:,.2f} ({commission_rate:.1f}%)
 
-🤝 <b>Please select an agent:</b>
+🤝 <b>请选择代理商:</b>
 """
         
         await update.message.reply_text(
@@ -507,7 +488,7 @@ async def show_agent_selection(update: Update, context: ContextTypes.DEFAULT_TYP
     except Exception as e:
         logger.error(f"获取代理商列表失败: {e}")
         await update.message.reply_text(
-            "❌ <b>Failed to get agent list</b>\n\nPlease try again later.",
+            "❌ <b>获取代理商数据失败</b>\n\n请稍后再试。",
             parse_mode=ParseMode.HTML
         )
         return ConversationHandler.END
@@ -524,7 +505,6 @@ async def show_sales_confirmation(update: Update, context: ContextTypes.DEFAULT_
     # 获取数据
     amount = context.user_data['sales_amount']
     client_type = context.user_data['sales_client']
-    bill_to = context.user_data.get('sales_bill_to', '')
     commission = context.user_data['sales_commission']
     commission_rate = context.user_data.get('commission_rate', 0) * 100
     person = context.user_data['sales_person']
@@ -544,7 +524,6 @@ async def show_sales_confirmation(update: Update, context: ContextTypes.DEFAULT_
 👤 <b>Person in Charge:</b> {person}
 💰 <b>Amount:</b> RM{amount:,.2f}
 🎯 <b>Client Type:</b> {client_display}
-📝 <b>Bill to:</b> {bill_to}
 {commission_display}
 
 <b>Please confirm the information:</b>
@@ -576,7 +555,6 @@ async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
         # 准备数据
         client_type = context.user_data['sales_client']
-        bill_to = context.user_data.get('sales_bill_to', '')
         agent_info = ""
         if client_type == "Agent" and 'sales_agent' in context.user_data:
             agent_info = context.user_data['sales_agent']
@@ -590,13 +568,6 @@ async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         elif commission_type == 'fixed':
             commission_note = "Fixed commission amount"
         
-        # 构建备注，包含Bill to信息
-        notes = f"Bill to: {bill_to}"
-        if agent_info:
-            notes += f", Agent: {agent_info}"
-        if commission_note:
-            notes += f", {commission_note}"
-        
         sales_data = {
             'date': datetime.now().strftime('%Y-%m-%d %H:%M'),
             'person': context.user_data['sales_person'],
@@ -604,7 +575,7 @@ async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             'client_type': client_type,
             'commission_rate': context.user_data.get('commission_rate', 0),
             'commission_amount': context.user_data['sales_commission'],
-            'notes': notes
+            'notes': f"Agent: {agent_info}" + (f", {commission_note}" if commission_note else "")
         }
         
         sheets_manager.add_sales_record(sales_data)
@@ -619,11 +590,9 @@ async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 👤 <b>Person in Charge:</b> {person}
 💰 <b>Amount:</b> RM{amount:,.2f}
-📝 <b>Bill to:</b> {bill_to}
 💵 <b>Commission:</b> RM{commission:,.2f}
 🕒 <b>Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M')}
 """
-        
         
         keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="back_main")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -999,63 +968,35 @@ async def cost_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await query.answer()
     
     try:
-        from config import GoogleSheetsManager
-        
-        # 创建Google Sheets管理器实例
-        sheets_manager = GoogleSheetsManager()
-        
         # 获取数据
-        cost_type = context.user_data.get('cost_type', '')
-        amount = context.user_data.get('cost_amount', 0)
+        cost_type = context.user_data['cost_type']
+        amount = context.user_data['cost_amount']
         supplier = context.user_data.get('cost_supplier', '')
-        description = context.user_data.get('cost_desc', '')
-        receipt_url = context.user_data.get('receipt_url', '')
+        desc = context.user_data.get('cost_desc', '')
+        receipt = context.user_data.get('cost_receipt', '')
         
-        # 如果是账单类型，根据不同类型设置描述
-        if cost_type.endswith("Bill") and cost_type != "Other Bill":
-            # 对于标准账单，如水电网络等，使用类型作为描述
-            category = "Utility"
-        elif cost_type.startswith("Other Bill:"):
-            # 对于其他账单，保留描述
-            cost_type = "Other Bill"
-            category = "Other"
-        elif cost_type == "Worker Salary":
-            category = "Salary"
-        elif cost_type == "Purchasing":
-            category = "Purchase"
-        else:
-            category = "Other"
+        # 记录到Google Sheets
+        date_str = datetime.now().strftime('%Y-%m-%d')
         
-        # 添加收据URL到描述
-        if receipt_url:
-            if description:
-                description = f"{description} | Receipt: {receipt_url}"
-            else:
-                description = f"Receipt: {receipt_url}"
-        
-        # 准备数据
-        expense_data = {
-            'date': datetime.now().strftime('%Y-%m-%d'),
+        sheets_manager = SheetsManager()
+        data = {
+            'date': date_str,
             'type': cost_type,
             'supplier': supplier,
             'amount': amount,
-            'category': category,
-            'description': description
+            'category': supplier if supplier else 'Other',
+            'description': desc
         }
+        sheets_manager.add_expense_record(data)
         
-        # 保存到Google Sheets
-        success = sheets_manager.add_expense_record(expense_data)
+        # 显示成功消息
+        await query.edit_message_text(
+            "✅ <b>Expense has been saved successfully!</b>",
+            parse_mode=ParseMode.HTML
+        )
         
-        if success:
-            await query.edit_message_text(
-                "✅ <b>Expense saved successfully!</b>",
-                parse_mode=ParseMode.HTML
-            )
-        else:
-            await query.edit_message_text(
-                "❌ <b>Failed to save expense</b>",
-                parse_mode=ParseMode.HTML
-            )
+        # 清除用户数据
+        context.user_data.clear()
         
         # 结束对话
         return ConversationHandler.END
@@ -1070,76 +1011,26 @@ async def cost_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def cost_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """处理收据上传"""
-    try:
-        from config import GoogleSheetsManager
-        
-        # 创建Google Sheets管理器实例
-        sheets_manager = GoogleSheetsManager()
-        
-        # 这里可以处理照片或文件
-        if update.message.photo:
-            # 如果是照片，获取最高质量的照片ID
-            file_id = update.message.photo[-1].file_id
-            context.user_data['cost_receipt'] = file_id
-            context.user_data['cost_receipt_type'] = 'photo'
-            
-            # 获取文件对象
-            file_obj = await context.bot.get_file(file_id)
-            
-            # 生成唯一文件名
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            file_name = f"receipt_{timestamp}.jpg"
-            
-            # 告诉用户正在上传
-            status_message = await update.message.reply_text("📤 正在上传照片到Google Drive...")
-            
-            # 上传文件到Google Drive
-            file_url = sheets_manager.upload_telegram_file(file_obj, file_name)
-            
-            if file_url:
-                # 保存URL到用户数据
-                context.user_data['receipt_url'] = file_url
-                await status_message.edit_text("✅ 照片上传成功！")
-            else:
-                await status_message.edit_text("⚠️ 照片上传失败，但您可以继续操作")
-            
-        elif update.message.document:
-            # 如果是文件，获取文件ID
-            file_id = update.message.document.file_id
-            file_name = update.message.document.file_name or "document"
-            context.user_data['cost_receipt'] = file_id
-            context.user_data['cost_receipt_type'] = 'document'
-            
-            # 获取文件对象
-            file_obj = await context.bot.get_file(file_id)
-            
-            # 告诉用户正在上传
-            status_message = await update.message.reply_text("📤 正在上传文件到Google Drive...")
-            
-            # 上传文件到Google Drive
-            file_url = sheets_manager.upload_telegram_file(file_obj, file_name)
-            
-            if file_url:
-                # 保存URL到用户数据
-                context.user_data['receipt_url'] = file_url
-                await status_message.edit_text("✅ 文件上传成功！")
-            else:
-                await status_message.edit_text("⚠️ 文件上传失败，但您可以继续操作")
-            
-        else:
-            # 如果没有上传图片或文档，提示用户
-            await update.message.reply_html(
-                "⚠️ <b>Please upload a photo or document as receipt.</b>\n\nOr type /skip to continue without receipt."
-            )
-            return COST_RECEIPT
-        
-        # 继续到确认页面
-        return await show_cost_confirmation(update, context)
-        
-    except Exception as e:
-        logger.error(f"❌ 处理收据上传失败: {e}")
-        # 即使上传失败，也继续流程
-        return await show_cost_confirmation(update, context)
+    # 这里可以处理照片或文件
+    if update.message.photo:
+        # 如果是照片，获取最高质量的照片ID
+        file_id = update.message.photo[-1].file_id
+        context.user_data['cost_receipt'] = file_id
+        context.user_data['cost_receipt_type'] = 'photo'
+    elif update.message.document:
+        # 如果是文件，获取文件ID
+        file_id = update.message.document.file_id
+        context.user_data['cost_receipt'] = file_id
+        context.user_data['cost_receipt_type'] = 'document'
+    else:
+        # 如果没有上传图片或文档，提示用户
+        await update.message.reply_html(
+            "⚠️ <b>Please upload a photo or document as receipt.</b>\n\nOr type /skip to continue without receipt."
+        )
+        return COST_RECEIPT
+    
+    # 继续到确认页面
+    return await show_cost_confirmation(update, context)
 
 async def show_cost_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """显示费用确认信息"""
@@ -1648,7 +1539,6 @@ def get_conversation_handlers():
             ],
             SALES_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, sales_amount_handler)],
             SALES_CLIENT: [CallbackQueryHandler(sales_client_handler, pattern="^client_")],
-            SALES_BILL_TO: [MessageHandler(filters.TEXT & ~filters.COMMAND, sales_bill_to_handler)],
             SALES_COMMISSION_TYPE: [CallbackQueryHandler(sales_commission_type_handler, pattern="^commission_")],
             SALES_COMMISSION_PERCENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, sales_commission_percent_handler)],
             SALES_COMMISSION_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, sales_commission_amount_handler)],
@@ -1746,9 +1636,6 @@ def register_handlers(application):
     application.add_handler(CommandHandler("cancel", cancel_command))
     application.add_handler(CommandHandler("Setting", setting_command))
     application.add_handler(CommandHandler("SaleInvoice", sale_invoice_command))
-    application.add_handler(CommandHandler("UpdateAgents", update_agents_command))  # 添加更新代理商管理表的命令
-    application.add_handler(CommandHandler("UpdatePICs", update_pics_command))  # 添加更新负责人管理表的命令
-    application.add_handler(CommandHandler("PreloadCache", preload_cache_command))  # 添加预加载缓存的命令
     
     # 回调查询处理器 (放在会话处理器之后)
     application.add_handler(CallbackQueryHandler(sales_callback_handler, pattern='^sales_'))
@@ -1869,7 +1756,7 @@ async def setting_name_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             # 创建一个简单的数据结构，类似于其他添加方法
             setting_data = {
                 'name': name,
-                'status': 'Active'  # 修改为英文状态
+                'status': '激活'
             }
             
             # 使用已有的方法添加数据
@@ -1901,11 +1788,11 @@ async def setting_ic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     try:
         sheets_manager = SheetsManager()
         
-        # 添加代理商，只包含Name、IC和Phone三个字段
+        # 添加代理商，包含IC号码
         agent_data = {
             'name': name,
-            'ic': ic,     # 使用ic字段
-            'phone': ''   # 添加空的phone字段
+            'ic': ic,
+            'status': '激活'
         }
         
         sheets_manager.add_agent(agent_data)
@@ -1957,7 +1844,7 @@ async def setting_type_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 'phone': '',
                 'email': '',
                 'products': type_value,
-                'status': 'Active'  # 修改为英文状态
+                'status': '激活'
             }
             sheets_manager.add_supplier(data)
         elif category == "worker":
@@ -1966,7 +1853,7 @@ async def setting_type_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 'contact': ic,
                 'phone': '',
                 'position': type_value,
-                'status': 'Active'  # 修改为英文状态
+                'status': '激活'
             }
             sheets_manager.add_worker(data)
         elif category == "pic":
@@ -1975,7 +1862,7 @@ async def setting_type_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 'contact': ic,
                 'phone': '',
                 'department': type_value,
-                'status': 'Active'  # 修改为英文状态
+                'status': '激活'
             }
             sheets_manager.add_pic(data)
         
@@ -2018,11 +1905,8 @@ async def setting_type_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         return ConversationHandler.END
         
     except Exception as e:
-        logger.error(f"添加{category}失败: {e}")
-        await update.message.reply_text(
-            f"❌ 添加 {category_names.get(category, 'Item')} 失败，请重试",
-            parse_mode=ParseMode.HTML
-        )
+        logger.error(f"保存设置失败: {e}")
+        await update.message.reply_text("❌ <b>Failed to save</b>\n\nPlease try again later.", parse_mode=ParseMode.HTML)
         return ConversationHandler.END
 
 async def sale_invoice_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -2033,19 +1917,6 @@ async def sale_invoice_command(update: Update, context: ContextTypes.DEFAULT_TYP
     # 判断是命令还是回调查询
     is_callback = update.callback_query is not None
     
-    # 先发送加载提示
-    if is_callback:
-        await update.callback_query.answer("Loading...")
-        loading_message = await update.callback_query.edit_message_text(
-            "⏳ <b>Loading Person in Charge list...</b>",
-            parse_mode=ParseMode.HTML
-        )
-    else:
-        loading_message = await update.message.reply_text(
-            "⏳ <b>Loading Person in Charge list...</b>",
-            parse_mode=ParseMode.HTML
-        )
-    
     try:
         # 获取负责人列表
         sheets_manager = SheetsManager()
@@ -2053,11 +1924,11 @@ async def sale_invoice_command(update: Update, context: ContextTypes.DEFAULT_TYP
         
         if not pics:
             # 如果没有负责人数据，显示提示信息
-            keyboard = [[InlineKeyboardButton("⚙️ Create Person in Charge", callback_data="setting_create_pic")],
-                        [InlineKeyboardButton("❌ Cancel", callback_data="back_main")]]
+            keyboard = [[InlineKeyboardButton("⚙️ 创建负责人", callback_data="setting_create_pic")],
+                        [InlineKeyboardButton("❌ 取消", callback_data="back_main")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            message = "⚠️ <b>No Person in Charge found</b>\n\nPlease create one first."
+            message = "⚠️ <b>未找到负责人数据</b>\n\n请先创建负责人后再使用此功能。"
             
             if is_callback:
                 await update.callback_query.edit_message_text(
@@ -2066,7 +1937,7 @@ async def sale_invoice_command(update: Update, context: ContextTypes.DEFAULT_TYP
                     reply_markup=reply_markup
                 )
             else:
-                await loading_message.edit_text(
+                await update.message.reply_text(
                     message,
                     parse_mode=ParseMode.HTML,
                     reply_markup=reply_markup
@@ -2076,8 +1947,8 @@ async def sale_invoice_command(update: Update, context: ContextTypes.DEFAULT_TYP
         # 创建负责人选择按钮
         keyboard = []
         for pic in pics:
-            # 使用姓名作为按钮文本 - 更新字段名为英文
-            name = pic.get('Name', '')
+            # 使用姓名作为按钮文本
+            name = pic.get('姓名', '')
             if name:
                 keyboard.append([InlineKeyboardButton(f"👤 {name}", callback_data=f"pic_{name}")])
         
@@ -2094,7 +1965,7 @@ async def sale_invoice_command(update: Update, context: ContextTypes.DEFAULT_TYP
                 reply_markup=reply_markup
             )
         else:
-            await loading_message.edit_text(
+            await update.message.reply_text(
                 message,
                 parse_mode=ParseMode.HTML,
                 reply_markup=reply_markup
@@ -2114,7 +1985,7 @@ async def sale_invoice_command(update: Update, context: ContextTypes.DEFAULT_TYP
                 parse_mode=ParseMode.HTML
             )
         else:
-            await loading_message.edit_text(
+            await update.message.reply_text(
                 error_message,
                 parse_mode=ParseMode.HTML
             )
@@ -2181,59 +2052,86 @@ async def cost_list_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
 
 async def setting_rate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理佣金比例输入 - 由于不再需要存储佣金率，我们直接结束会话"""
-    rate_text = update.message.text.strip()
+    """处理代理商佣金比例输入"""
+    rate_input = update.message.text.strip()
     
     try:
-        # 处理百分比格式，如果有百分号则去掉
-        rate_text = rate_text.replace('%', '')
-        rate = float(rate_text) / 100  # 转换为小数
+        # 尝试将输入转换为浮点数
+        rate = float(rate_input.replace('%', '')) / 100
+        if rate < 0 or rate > 1:
+            await update.message.reply_text("⚠️ <b>Invalid rate</b>\n\nPlease enter a percentage between 0-100%.", parse_mode=ParseMode.HTML)
+            return SETTING_RATE
+            
+        context.user_data['setting_rate'] = rate
         
-        # 获取之前保存的数据
+        # 获取之前收集的数据
         category = context.user_data.get('setting_category')
         name = context.user_data.get('setting_name')
         ic = context.user_data.get('setting_ic', '')
+        type_value = context.user_data.get('setting_type', '')
         
-        # 显示成功消息，但不再保存佣金率
-        category_names = {
-            "agent": "Agent",
-            "supplier": "Supplier",
-            "worker": "Worker",
-            "pic": "Person in Charge"
-        }
-        
-        category_emojis = {
-            "agent": "👨‍💼",
-            "supplier": "🏭",
-            "worker": "👷",
-            "pic": "👑"
-        }
-        
-        emoji = category_emojis.get(category, "➕")
-        category_name = category_names.get(category, "Item")
-        
-        success_message = f"{emoji} <b>Note: Commission rate is no longer stored in the system.</b>\n\n"
-        success_message += f"<b>Name:</b> {name}\n"
-        success_message += f"<b>IC:</b> {ic}\n"
-        success_message += f"<b>Commission Rate:</b> {rate*100:.1f}% (for reference only)\n"
-        
-        keyboard = [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="back_main")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await update.message.reply_html(
-            success_message,
-            reply_markup=reply_markup
-        )
-        
-        # 清除用户数据
-        context.user_data.clear()
-        return ConversationHandler.END
+        # 保存到Google Sheets
+        try:
+            sheets_manager = SheetsManager()
+            
+            if category == "agent":
+                data = {
+                    'name': name,
+                    'contact': ic,
+                    'phone': '',
+                    'email': '',
+                    'commission_rate': rate,
+                    'status': '激活'
+                }
+                sheets_manager.add_agent(data)
+            
+            # 显示成功消息
+            category_names = {
+                "agent": "Agent",
+                "supplier": "Supplier",
+                "worker": "Worker",
+                "pic": "Person in Charge"
+            }
+            
+            category_emojis = {
+                "agent": "👨‍💼",
+                "supplier": "🏭",
+                "worker": "👷",
+                "pic": "👑"
+            }
+            
+            emoji = category_emojis.get(category, "➕")
+            category_name = category_names.get(category, "Item")
+            
+            success_message = f"{emoji} <b>{category_name} created successfully!</b>\n\n"
+            success_message += f"<b>Name:</b> {name}\n"
+            
+            if ic:
+                success_message += f"<b>IC/Contact:</b> {ic}\n"
+            if type_value:
+                success_message += f"<b>Type:</b> {type_value}\n"
+            if rate:
+                success_message += f"<b>Commission Rate:</b> {rate*100:.1f}%\n"
+            
+            keyboard = [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="back_main")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await update.message.reply_html(
+                success_message,
+                reply_markup=reply_markup
+            )
+            
+            # 清除用户数据
+            context.user_data.clear()
+            return ConversationHandler.END
+            
+        except Exception as e:
+            logger.error(f"保存设置失败: {e}")
+            await update.message.reply_text("❌ <b>Failed to save</b>\n\nPlease try again later.", parse_mode=ParseMode.HTML)
+            return ConversationHandler.END
             
     except ValueError:
-        # 如果输入的不是有效的数字
-        await update.message.reply_text(
-            "⚠️ Please enter a valid number (e.g. 5 or 5%)"
-        )
+        await update.message.reply_text("⚠️ <b>Invalid format</b>\n\nPlease enter a valid percentage (e.g. 5 or 5%).", parse_mode=ParseMode.HTML)
         return SETTING_RATE
 
 async def sales_agent_select_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -2243,11 +2141,16 @@ async def sales_agent_select_handler(update: Update, context: ContextTypes.DEFAU
     
     agent_data = query.data
     if agent_data.startswith("agent_"):
-        # 解析代理商数据 agent_{name}_
+        # 解析代理商数据 agent_{name}_{commission}
         parts = agent_data[6:].split('_')
         if len(parts) >= 1:
             agent_name = parts[0]
             context.user_data['sales_agent'] = agent_name
+            
+            # 获取代理商默认佣金比例（如果有）
+            default_commission = ""
+            if len(parts) >= 2:
+                default_commission = parts[1]
             
             # 显示佣金计算方式选择界面
             amount = context.user_data['sales_amount']
@@ -2262,6 +2165,7 @@ async def sales_agent_select_handler(update: Update, context: ContextTypes.DEFAU
             message = f"""
 🤝 <b>Agent:</b> {agent_name}
 💰 <b>Amount:</b> RM{amount:,.2f}
+{f"💵 <b>Default Commission Rate:</b> {default_commission}" if default_commission else ""}
 
 <b>Please select commission calculation method:</b>
 """
@@ -2320,82 +2224,3 @@ async def menu_setting_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         reply_markup=reply_markup
     )
     return SETTING_CATEGORY
-
-async def update_agents_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """处理 /UpdateAgents 命令 - 更新代理商管理表结构"""
-    try:
-        sheets_manager = SheetsManager()
-        result = sheets_manager.update_agents_worksheet()
-        
-        if result:
-            await update.message.reply_text(
-                "✅ 代理商管理表结构已成功更新，现在只显示Name、IC和Phone三列。",
-                parse_mode=ParseMode.HTML
-            )
-        else:
-            await update.message.reply_text(
-                "❌ 更新代理商管理表结构失败，请查看日志了解详情。",
-                parse_mode=ParseMode.HTML
-            )
-    except Exception as e:
-        logger.error(f"❌ 执行更新代理商管理表命令失败: {e}")
-        await update.message.reply_text(
-            "❌ 更新代理商管理表时发生错误，请查看日志了解详情。",
-            parse_mode=ParseMode.HTML
-        )
-
-async def update_pics_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """处理 /UpdatePICs 命令 - 更新负责人管理表结构"""
-    try:
-        sheets_manager = SheetsManager()
-        result = sheets_manager.update_pic_worksheet()
-        
-        if result:
-            await update.message.reply_text(
-                "✅ 负责人管理表结构已成功更新。",
-                parse_mode=ParseMode.HTML
-            )
-        else:
-            await update.message.reply_text(
-                "❌ 更新负责人管理表结构失败，请查看日志了解详情。",
-                parse_mode=ParseMode.HTML
-            )
-    except Exception as e:
-        logger.error(f"❌ 执行更新负责人管理表命令失败: {e}")
-        await update.message.reply_text(
-            "❌ 更新负责人管理表时发生错误，请查看日志了解详情。",
-            parse_mode=ParseMode.HTML
-        )
-
-async def preload_cache_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """处理 /PreloadCache 命令 - 预加载所有缓存数据"""
-    loading_message = await update.message.reply_text(
-        "⏳ <b>Preloading cache data...</b>",
-        parse_mode=ParseMode.HTML
-    )
-    
-    try:
-        sheets_manager = SheetsManager()
-        
-        # 预加载负责人列表
-        pics = sheets_manager.get_pics(active_only=True)
-        pics_count = len(pics)
-        
-        # 预加载代理商列表
-        agents = sheets_manager.get_agents(active_only=True)
-        agents_count = len(agents)
-        
-        await loading_message.edit_text(
-            f"✅ <b>Cache preloaded successfully!</b>\n\n"
-            f"📊 <b>Stats:</b>\n"
-            f"- {pics_count} Person in Charge loaded\n"
-            f"- {agents_count} Agents loaded\n\n"
-            f"<i>Response time should be faster now.</i>",
-            parse_mode=ParseMode.HTML
-        )
-    except Exception as e:
-        logger.error(f"❌ 预加载缓存失败: {e}")
-        await loading_message.edit_text(
-            "❌ <b>Failed to preload cache</b>\n\nPlease try again later.",
-            parse_mode=ParseMode.HTML
-        )
