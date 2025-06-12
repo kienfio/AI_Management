@@ -1357,6 +1357,10 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
                 logger.error(f"发送错误消息失败: {e2}")
             return ConversationHandler.END
     
+    # 设置相关回调
+    elif query.data.startswith("setting_create_"):
+        return await setting_category_handler(update, context)
+    
     # 各功能菜单回调
     elif query.data == "menu_sales":
         # 这里不做任何处理，因为menu_sales回调已经在ConversationHandler的entry_points中处理
@@ -1755,8 +1759,9 @@ async def setting_name_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             
             # 创建一个简单的数据结构，类似于其他添加方法
             setting_data = {
-                'name': name,
-                'status': '激活'
+                # 修改这里，使用'姓名'字段而不是'name'
+                '姓名': name,
+                '状态': '激活'
             }
             
             # 使用已有的方法添加数据
@@ -1858,11 +1863,11 @@ async def setting_type_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             sheets_manager.add_worker(data)
         elif category == "pic":
             data = {
-                'name': name,
-                'contact': ic,
-                'phone': '',
-                'department': type_value,
-                'status': '激活'
+                '姓名': name,
+                '联系人': ic,
+                '电话': '',
+                '部门': type_value,
+                '状态': '激活'
             }
             sheets_manager.add_pic(data)
         
@@ -1924,11 +1929,11 @@ async def sale_invoice_command(update: Update, context: ContextTypes.DEFAULT_TYP
         
         if not pics:
             # 如果没有负责人数据，显示提示信息
-            keyboard = [[InlineKeyboardButton("⚙️ 创建负责人", callback_data="setting_create_pic")],
-                        [InlineKeyboardButton("❌ 取消", callback_data="back_main")]]
+            keyboard = [[InlineKeyboardButton("⚙️ Create Person in Charge", callback_data="setting_create_pic")],
+                        [InlineKeyboardButton("❌ Cancel", callback_data="back_main")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            message = "⚠️ <b>未找到负责人数据</b>\n\n请先创建负责人后再使用此功能。"
+            message = "⚠️ <b>No person in charge found</b>\n\nPlease create a person in charge first."
             
             if is_callback:
                 await update.callback_query.edit_message_text(
@@ -1942,6 +1947,7 @@ async def sale_invoice_command(update: Update, context: ContextTypes.DEFAULT_TYP
                     parse_mode=ParseMode.HTML,
                     reply_markup=reply_markup
                 )
+            # 不结束对话，等待回调处理
             return ConversationHandler.END
             
         # 创建负责人选择按钮
