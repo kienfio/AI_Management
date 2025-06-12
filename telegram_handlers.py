@@ -1804,7 +1804,10 @@ async def setting_ic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         # 添加代理商，包含IC号码
         agent_data = {
             'name': name,
-            'ic': ic,
+            'contact': ic,  # IC号码
+            'phone': '',    # 电话（可选）
+            'email': '',    # 邮箱（可选）
+            'commission_rate': 0,  # 默认佣金比例
             'status': '激活'
         }
         
