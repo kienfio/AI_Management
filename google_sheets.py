@@ -14,20 +14,20 @@ import json
 from google.oauth2.service_account import Credentials
 # 直接导入常量，避免循环导入
 SHEET_NAMES = {
-    'sales': '销售记录',
-    'expenses': '费用记录', 
-    'agents': '代理商管理',
-    'suppliers': '供应商管理',
-    'workers': '工作人员管理',
-    'pic': '负责人管理'
+    'sales': 'Sales Records',
+    'expenses': 'Expense Records', 
+    'agents': 'Agents Management',
+    'suppliers': 'Suppliers Management',
+    'workers': 'Workers Management',
+    'pic': 'Person in Charge'
 }
 
-SALES_HEADERS = ['日期', '销售人员', '发票金额', '开单给', '客户类型', '佣金比例', '佣金金额', '备注']
-EXPENSES_HEADERS = ['日期', '费用类型', '供应商', '金额', '类别', '备注']
-AGENTS_HEADERS = ['姓名', '联系人', '电话', '邮箱', '佣金比例', '状态']
-SUPPLIERS_HEADERS = ['供应商名称', '联系人', '电话', '邮箱', '产品/服务', '状态']
-WORKERS_HEADERS = ['姓名', '联系人', '电话', '职位', '状态']
-PICS_HEADERS = ['姓名', '联系人', '电话', '部门', '状态']
+SALES_HEADERS = ['Date', 'Person', 'Amount', 'Bill To', 'Client Type', 'Commission Rate', 'Commission Amount', 'Notes']
+EXPENSES_HEADERS = ['Date', 'Expense Type', 'Supplier', 'Amount', 'Category', 'Notes']
+AGENTS_HEADERS = ['Name', 'Contact', 'Phone', 'Email', 'Commission Rate', 'Status']
+SUPPLIERS_HEADERS = ['Name', 'Contact', 'Phone', 'Email', 'Products/Services', 'Status']
+WORKERS_HEADERS = ['Name', 'Contact', 'Phone', 'Position', 'Status']
+PICS_HEADERS = ['Name', 'Contact', 'Phone', 'Department', 'Status']
 
 logger = logging.getLogger(__name__)
 
@@ -236,7 +236,7 @@ class GoogleSheetsManager:
                         record[header] = ''
                 
                 # 获取字段值（兼容中英文表头）
-                date = record.get('日期', '')
+                date = record.get('Date', '')
                 
                 # 如果指定了月份，则过滤
                 if month and not date.startswith(month):
@@ -245,13 +245,13 @@ class GoogleSheetsManager:
                 # 构建标准化的记录
                 formatted_record = {
                     'date': date,
-                    'person': record.get('销售人员', ''),
-                    'amount': self._parse_number(record.get('发票金额', 0)),
-                    'bill_to': record.get('开单给', ''),  # 添加Bill to字段
-                    'client_type': record.get('客户类型', ''),
-                    'commission_rate': self._parse_number(record.get('佣金比例', 0)),
-                    'commission': self._parse_number(record.get('佣金金额', 0)),
-                    'notes': record.get('备注', '')
+                    'person': record.get('Person', ''),
+                    'amount': self._parse_number(record.get('Amount', 0)),
+                    'bill_to': record.get('Bill To', ''),  # 添加Bill to字段
+                    'client_type': record.get('Client Type', ''),
+                    'commission_rate': self._parse_number(record.get('Commission Rate', 0)),
+                    'commission': self._parse_number(record.get('Commission Amount', 0)),
+                    'notes': record.get('Notes', '')
                 }
                 
                 formatted_records.append(formatted_record)
@@ -288,11 +288,11 @@ class GoogleSheetsManager:
             
             row_data = [
                 data.get('date', datetime.now().strftime('%Y-%m-%d')),
-                data.get('expense_type', ''),
+                data.get('type', ''),
                 data.get('supplier', ''),
                 data.get('amount', 0),
                 data.get('category', ''),
-                data.get('notes', '')
+                data.get('description', '')
             ]
             
             worksheet.append_row(row_data)
@@ -310,16 +310,50 @@ class GoogleSheetsManager:
             if not worksheet:
                 return []
             
-            records = worksheet.get_all_records()
+            # 获取所有数据（包括表头）
+            all_values = worksheet.get_all_values()
+            if not all_values or len(all_values) <= 1:  # 没有数据或只有表头
+                return []
             
-            if month:
-                filtered_records = []
-                for record in records:
-                    if record.get('日期', '').startswith(month):
-                        filtered_records.append(record)
-                return filtered_records
+            # 获取表头和数据
+            headers = all_values[0]
+            data_rows = all_values[1:]
             
-            return records
+            # 处理记录
+            formatted_records = []
+            for row in data_rows:
+                # 确保行的长度与表头一致
+                if len(row) < len(headers):
+                    row.extend([''] * (len(headers) - len(row)))
+                
+                # 创建记录字典
+                record = {}
+                for i, header in enumerate(headers):
+                    if i < len(row):
+                        record[header] = row[i]
+                    else:
+                        record[header] = ''
+                
+                # 获取字段值
+                date = record.get('Date', '')
+                
+                # 如果指定了月份，则过滤
+                if month and not date.startswith(month):
+                    continue
+                
+                # 构建标准化的记录
+                formatted_record = {
+                    'date': date,
+                    'expense_type': record.get('Expense Type', ''),
+                    'supplier': record.get('Supplier', ''),
+                    'amount': self._parse_number(record.get('Amount', 0)),
+                    'category': record.get('Category', ''),
+                    'notes': record.get('Notes', '')
+                }
+                
+                formatted_records.append(formatted_record)
+            
+            return formatted_records
             
         except Exception as e:
             logger.error(f"❌ 获取费用记录失败: {e}")
@@ -338,12 +372,12 @@ class GoogleSheetsManager:
             
             # 确保所有字段都有默认值
             row_data = [
-                data.get('name', ''),          # 姓名
-                data.get('contact', ''),       # IC/联系人
-                data.get('phone', ''),         # 电话
-                data.get('email', ''),         # 邮箱
-                data.get('commission_rate', 0),# 佣金比例
-                data.get('status', '激活')      # 状态
+                data.get('name', ''),          # Name
+                data.get('contact', ''),       # Contact
+                data.get('phone', ''),         # Phone
+                data.get('email', ''),         # Email
+                data.get('commission_rate', 0),# Commission Rate
+                data.get('status', '激活')      # Status
             ]
             
             # 转换数据类型
@@ -416,40 +450,40 @@ class GoogleSheetsManager:
             processed_records = []
             for record in records:
                 # 处理姓名字段
-                if '姓名' in record:
+                if 'Name' in record:
                     # 添加name字段作为姓名字段的别名
-                    record['name'] = record['姓名']
+                    record['name'] = record['Name']
                 elif 'name' in record:
-                    record['姓名'] = record['name']
+                    record['Name'] = record['name']
                 
                 # 处理佣金比例字段
-                if '佣金比例' in record:
+                if 'Commission Rate' in record:
                     # 尝试将佣金比例转换为浮点数
                     try:
-                        if isinstance(record['佣金比例'], str) and '%' in record['佣金比例']:
+                        if isinstance(record['Commission Rate'], str) and '%' in record['Commission Rate']:
                             # 如果是百分比字符串，转换为小数
-                            record['commission_rate'] = float(record['佣金比例'].replace('%', '')) / 100
+                            record['commission_rate'] = float(record['Commission Rate'].replace('%', '')) / 100
                         else:
-                            record['commission_rate'] = float(record['佣金比例'])
+                            record['commission_rate'] = float(record['Commission Rate'])
                     except (ValueError, TypeError):
-                        record['commission_rate'] = record['佣金比例']
+                        record['commission_rate'] = record['Commission Rate']
                 elif 'commission_rate' in record:
                     try:
                         if isinstance(record['commission_rate'], str) and '%' in record['commission_rate']:
                             # 如果是百分比字符串，转换为小数
-                            record['佣金比例'] = float(record['commission_rate'].replace('%', '')) / 100
+                            record['Commission Rate'] = float(record['commission_rate'].replace('%', '')) / 100
                         else:
-                            record['佣金比例'] = float(record['commission_rate'])
+                            record['Commission Rate'] = float(record['commission_rate'])
                     except (ValueError, TypeError):
-                        record['佣金比例'] = record['commission_rate']
+                        record['Commission Rate'] = record['commission_rate']
                 
                 processed_records.append(record)
             
             if active_only:
-                # 筛选激活状态的记录，兼容'状态'和'status'字段
+                # 筛选激活状态的记录，兼容'status'字段
                 active_records = []
                 for r in processed_records:
-                    status = r.get('状态', r.get('status', ''))
+                    status = r.get('Status', '')
                     if status == '激活':
                         active_records.append(r)
                 return active_records
@@ -472,12 +506,12 @@ class GoogleSheetsManager:
                 return False
             
             row_data = [
-                data.get('name', ''),
-                data.get('contact', ''),
-                data.get('phone', ''),
-                data.get('email', ''),
-                data.get('products', ''),
-                data.get('status', '激活')
+                data.get('name', ''),          # Name
+                data.get('contact', ''),       # Contact
+                data.get('phone', ''),         # Phone
+                data.get('email', ''),         # Email
+                data.get('products', ''),      # Products/Services
+                data.get('status', '激活')      # Status
             ]
             
             worksheet.append_row(row_data)
@@ -498,7 +532,7 @@ class GoogleSheetsManager:
             records = worksheet.get_all_records()
             
             if active_only:
-                return [r for r in records if r.get('状态') == '激活']
+                return [r for r in records if r.get('Status') == '激活']
             
             return records
             
@@ -518,11 +552,11 @@ class GoogleSheetsManager:
                 return False
             
             row_data = [
-                data.get('name', ''),
-                data.get('contact', ''),
-                data.get('phone', ''),
-                data.get('position', ''),
-                data.get('status', '激活')
+                data.get('name', ''),          # Name
+                data.get('contact', ''),       # Contact
+                data.get('phone', ''),         # Phone
+                data.get('position', ''),      # Position
+                data.get('status', '激活')      # Status
             ]
             
             worksheet.append_row(row_data)
@@ -543,7 +577,7 @@ class GoogleSheetsManager:
             records = worksheet.get_all_records()
             
             if active_only:
-                return [r for r in records if r.get('状态') == '激活']
+                return [r for r in records if r.get('Status') == '激活']
             
             return records
             
@@ -562,20 +596,20 @@ class GoogleSheetsManager:
             if not worksheet:
                 return False
             
-            # 获取名称，兼容'name'和'姓名'两种字段名
+            # 验证姓名字段
             name = data.get('name', '')
             if not name:
-                name = data.get('姓名', '')
+                name = data.get('Name', '')
                 if not name:
                     logger.error("负责人姓名不能为空")
                     return False
             
             row_data = [
-                name,  # 姓名
-                data.get('contact', data.get('联系人', '')),
-                data.get('phone', data.get('电话', '')),
-                data.get('department', data.get('部门', '')),
-                data.get('status', data.get('状态', '激活'))
+                name,  # Name
+                data.get('contact', data.get('Contact', '')),
+                data.get('phone', data.get('Phone', '')),
+                data.get('department', data.get('Department', '')),
+                data.get('status', data.get('Status', '激活'))
             ]
             
             worksheet.append_row(row_data)
@@ -599,20 +633,20 @@ class GoogleSheetsManager:
             processed_records = []
             for record in records:
                 # 如果记录中有'姓名'字段，直接添加
-                if '姓名' in record:
+                if 'Name' in record:
                     # 添加name字段作为姓名字段的别名
-                    record['name'] = record['姓名']
+                    record['name'] = record['Name']
                     processed_records.append(record)
                 # 如果没有'姓名'字段但有'name'字段，添加'姓名'字段
                 elif 'name' in record:
-                    record['姓名'] = record['name']
+                    record['Name'] = record['name']
                     processed_records.append(record)
             
             if active_only:
-                # 筛选激活状态的记录，兼容'状态'和'status'字段
+                # 筛选激活状态的记录，兼容'status'字段
                 active_records = []
                 for r in processed_records:
-                    status = r.get('状态', r.get('status', ''))
+                    status = r.get('Status', '')
                     if status == '激活':
                         active_records.append(r)
                 return active_records
@@ -639,13 +673,13 @@ class GoogleSheetsManager:
             total_commission = sum(float(r.get('commission', 0)) for r in sales_records)
             
             # 计算费用总额
-            total_expenses = sum(self._parse_number(r.get('金额', r.get('amount', 0))) for r in expense_records)
+            total_expenses = sum(self._parse_number(r.get('Amount', r.get('amount', 0))) for r in expense_records)
             
             # 按类型统计费用
             expense_by_type = {}
             for record in expense_records:
-                expense_type = record.get('费用类型', record.get('expense_type', '其他'))
-                amount = self._parse_number(record.get('金额', record.get('amount', 0)))
+                expense_type = record.get('Expense Type', record.get('expense_type', '其他'))
+                amount = self._parse_number(record.get('Amount', record.get('amount', 0)))
                 expense_by_type[expense_type] = expense_by_type.get(expense_type, 0) + amount
             
             # 计算各种费用
