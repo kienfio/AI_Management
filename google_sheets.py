@@ -22,7 +22,7 @@ SHEET_NAMES = {
     'pic': '负责人管理'
 }
 
-SALES_HEADERS = ['日期', '销售人员', '发票金额', '客户类型', '佣金比例', '佣金金额', '备注']
+SALES_HEADERS = ['日期', '销售人员', '发票金额', '开单给', '客户类型', '佣金比例', '佣金金额', '备注']
 EXPENSES_HEADERS = ['日期', '费用类型', '供应商', '金额', '类别', '备注']
 AGENTS_HEADERS = ['姓名', '联系人', '电话', '邮箱', '佣金比例', '状态']
 SUPPLIERS_HEADERS = ['供应商名称', '联系人', '电话', '邮箱', '产品/服务', '状态']
@@ -189,6 +189,7 @@ class GoogleSheetsManager:
                 data.get('date', datetime.now().strftime('%Y-%m-%d')),
                 data.get('person', ''),
                 data.get('amount', 0),
+                data.get('bill_to', ''),
                 data.get('client_type', ''),
                 data.get('commission_rate', 0),
                 data.get('commission_amount', 0),
@@ -210,21 +211,69 @@ class GoogleSheetsManager:
             if not worksheet:
                 return []
             
-            records = worksheet.get_all_records()
+            # 获取所有数据（包括表头）
+            all_values = worksheet.get_all_values()
+            if not all_values or len(all_values) <= 1:  # 没有数据或只有表头
+                return []
             
-            # 按月份过滤
-            if month:
-                filtered_records = []
-                for record in records:
-                    if record.get('日期', '').startswith(month):
-                        filtered_records.append(record)
-                return filtered_records
+            # 获取表头和数据
+            headers = all_values[0]
+            data_rows = all_values[1:]
             
-            return records
+            # 处理记录
+            formatted_records = []
+            for row in data_rows:
+                # 确保行的长度与表头一致
+                if len(row) < len(headers):
+                    row.extend([''] * (len(headers) - len(row)))
+                
+                # 创建记录字典
+                record = {}
+                for i, header in enumerate(headers):
+                    if i < len(row):
+                        record[header] = row[i]
+                    else:
+                        record[header] = ''
+                
+                # 获取字段值（兼容中英文表头）
+                date = record.get('日期', '')
+                
+                # 如果指定了月份，则过滤
+                if month and not date.startswith(month):
+                    continue
+                
+                # 构建标准化的记录
+                formatted_record = {
+                    'date': date,
+                    'person': record.get('销售人员', ''),
+                    'amount': self._parse_number(record.get('发票金额', 0)),
+                    'bill_to': record.get('开单给', ''),  # 添加Bill to字段
+                    'client_type': record.get('客户类型', ''),
+                    'commission_rate': self._parse_number(record.get('佣金比例', 0)),
+                    'commission': self._parse_number(record.get('佣金金额', 0)),
+                    'notes': record.get('备注', '')
+                }
+                
+                formatted_records.append(formatted_record)
+            
+            return formatted_records
             
         except Exception as e:
             logger.error(f"❌ 获取销售记录失败: {e}")
             return []
+    
+    def _parse_number(self, value) -> float:
+        """将各种格式的数值转换为浮点数"""
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            # 移除货币符号、千位分隔符等
+            clean_value = value.replace(',', '').replace('¥', '').replace('$', '').replace('€', '').replace('RM', '')
+            try:
+                return float(clean_value)
+            except ValueError:
+                pass
+        return 0.0
     
     # =============================================================================
     # 费用记录操作
@@ -581,45 +630,63 @@ class GoogleSheetsManager:
     def generate_monthly_report(self, month: str) -> Dict[str, Any]:
         """生成月度报表"""
         try:
-            # 获取销售和费用数据
+            # 获取销售记录和费用记录
             sales_records = self.get_sales_records(month)
             expense_records = self.get_expense_records(month)
             
             # 计算销售总额和佣金
-            total_sales = sum(float(r.get('发票金额', 0)) for r in sales_records)
-            total_commission = sum(float(r.get('佣金金额', 0)) for r in sales_records)
+            total_sales = sum(float(r.get('amount', 0)) for r in sales_records)
+            total_commission = sum(float(r.get('commission', 0)) for r in sales_records)
             
             # 计算费用总额
-            total_expenses = sum(float(r.get('金额', 0)) for r in expense_records)
+            total_expenses = sum(self._parse_number(r.get('金额', r.get('amount', 0))) for r in expense_records)
             
             # 按类型统计费用
             expense_by_type = {}
             for record in expense_records:
-                expense_type = record.get('费用类型', '其他')
-                amount = float(record.get('金额', 0))
+                expense_type = record.get('费用类型', record.get('expense_type', '其他'))
+                amount = self._parse_number(record.get('金额', record.get('amount', 0)))
                 expense_by_type[expense_type] = expense_by_type.get(expense_type, 0) + amount
             
-            # 计算净利润
-            net_profit = total_sales - total_commission - total_expenses
+            # 计算各种费用
+            purchase_cost = expense_by_type.get('Purchasing', 0)
+            utility_cost = expense_by_type.get('Billing', 0) + expense_by_type.get('Water Bill', 0) + \
+                          expense_by_type.get('Electricity Bill', 0) + expense_by_type.get('WiFi Bill', 0)
+            salary_cost = expense_by_type.get('Worker Salary', 0)
+            other_cost = total_expenses - purchase_cost - utility_cost - salary_cost
             
-            report = {
+            # 计算毛利和净利
+            gross_profit = total_sales - total_commission
+            net_profit = gross_profit - total_expenses
+            
+            return {
                 'month': month,
                 'total_sales': total_sales,
                 'total_commission': total_commission,
-                'total_expenses': total_expenses,
-                'net_profit': net_profit,
-                'sales_count': len(sales_records),
-                'expense_count': len(expense_records),
-                'expense_by_type': expense_by_type,
-                'generated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                'gross_profit': gross_profit,
+                'total_cost': total_expenses,
+                'purchase_cost': purchase_cost,
+                'utility_cost': utility_cost,
+                'salary_cost': salary_cost,
+                'other_cost': other_cost,
+                'net_profit': net_profit
             }
-            
-            logger.info(f"✅ 月度报表生成成功: {month}")
-            return report
             
         except Exception as e:
             logger.error(f"❌ 生成月度报表失败: {e}")
-            return {}
+            # 返回空报表
+            return {
+                'month': month,
+                'total_sales': 0,
+                'total_commission': 0,
+                'gross_profit': 0,
+                'total_cost': 0,
+                'purchase_cost': 0,
+                'utility_cost': 0,
+                'salary_cost': 0,
+                'other_cost': 0,
+                'net_profit': 0
+            }
 
 # 创建全局实例
 sheets_manager = GoogleSheetsManager()
