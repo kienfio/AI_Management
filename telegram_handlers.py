@@ -1729,6 +1729,7 @@ async def setting_name_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data['setting_name'] = name
     
     category = context.user_data.get('setting_category')
+    logger.info(f"处理名称输入: {name}, 类别: {category}")
     
     keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_main")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1769,27 +1770,37 @@ async def setting_name_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             setting_data = {
                 # 修改这里，使用'姓名'字段而不是'name'
                 '姓名': name,
+                '联系人': '',
+                '电话': '',
+                '部门': '',
                 '状态': '激活'
             }
             
+            logger.info(f"尝试添加 {category_name}: {setting_data}")
+            
             # 使用已有的方法添加数据
             if category == "worker":
-                sheets_manager.add_worker(setting_data)
+                result = sheets_manager.add_worker(setting_data)
             else:  # pic
-                sheets_manager.add_pic(setting_data)
+                result = sheets_manager.add_pic(setting_data)
             
-            keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="back_main")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await update.message.reply_text(
-                f"✅ {category_name} \"{name}\" has been successfully added!",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=reply_markup
-            )
+            if result:
+                logger.info(f"成功添加 {category_name}: {name}")
+                keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="back_main")]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await update.message.reply_text(
+                    f"✅ {category_name} \"{name}\" has been successfully added!",
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=reply_markup
+                )
+            else:
+                logger.error(f"添加 {category_name} 失败，返回值为 False")
+                await update.message.reply_text("❌ Failed to add. Please try again.")
             
         except Exception as e:
             logger.error(f"添加{category}失败: {e}")
-            await update.message.reply_text("❌ 添加失败，请重试")
+            await update.message.reply_text(f"❌ Failed to add: {str(e)}")
         
         return ConversationHandler.END
 
