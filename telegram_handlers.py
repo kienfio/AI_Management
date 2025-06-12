@@ -286,9 +286,9 @@ async def sales_client_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         # 创建代理商选择按钮
         keyboard = []
         for agent in agents:
-            # 使用姓名作为按钮文本
-            name = agent.get('姓名', '')
-            commission = agent.get('佣金比例', '')
+            # 使用姓名作为按钮文本 - 更新为英文字段名
+            name = agent.get('Name', '')
+            commission = agent.get('Commission Rate', '')
             display_text = f"{name}"
             if commission:
                 display_text += f" ({commission})"
@@ -312,7 +312,7 @@ async def sales_client_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     except Exception as e:
         logger.error(f"获取代理商列表失败: {e}")
         await query.edit_message_text(
-            "❌ <b>Failed to get agent data</b>\n\nPlease try again later.",
+            "❌ <b>Failed to get agent list</b>\n\nPlease try again later.",
             parse_mode=ParseMode.HTML
         )
         return ConversationHandler.END
@@ -455,10 +455,15 @@ async def show_agent_selection(update: Update, context: ContextTypes.DEFAULT_TYP
         # 创建代理商选择按钮
         keyboard = []
         for agent in agents:
-            # 使用姓名作为按钮文本
-            name = agent.get('姓名', '')
+            # 使用姓名作为按钮文本 - 更新为英文字段名
+            name = agent.get('Name', '')
+            commission = agent.get('Commission Rate', '')
+            display_text = f"{name}"
+            if commission:
+                display_text += f" ({commission})"
+                
             if name:
-                keyboard.append([InlineKeyboardButton(f"🤝 {name}", callback_data=f"agent_{name}")])
+                keyboard.append([InlineKeyboardButton(f"🤝 {display_text}", callback_data=f"agent_{name}_{commission}")])
         
         # 添加取消按钮
         keyboard.append([InlineKeyboardButton("❌ 取消", callback_data="back_main")])
@@ -2025,8 +2030,8 @@ async def sale_invoice_command(update: Update, context: ContextTypes.DEFAULT_TYP
         # 创建负责人选择按钮
         keyboard = []
         for pic in pics:
-            # 使用姓名作为按钮文本
-            name = pic.get('姓名', '')
+            # 使用姓名作为按钮文本 - 更新字段名为英文
+            name = pic.get('Name', '')
             if name:
                 keyboard.append([InlineKeyboardButton(f"👤 {name}", callback_data=f"pic_{name}")])
         
@@ -2229,6 +2234,13 @@ async def sales_agent_select_handler(update: Update, context: ContextTypes.DEFAU
             default_commission = ""
             if len(parts) >= 2:
                 default_commission = parts[1]
+                # 如果有默认佣金比例，转换为浮点数并存储
+                try:
+                    if default_commission:
+                        default_rate = float(default_commission)
+                        context.user_data['default_commission_rate'] = default_rate
+                except ValueError:
+                    logger.warning(f"无法解析佣金比例: {default_commission}")
             
             # 显示佣金计算方式选择界面
             amount = context.user_data['sales_amount']
