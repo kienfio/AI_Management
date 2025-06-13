@@ -311,10 +311,12 @@ async def sales_client_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         for agent in agents:
             # 使用姓名作为按钮文本
             name = agent.get('name', agent.get('Name', ''))
+            # 获取IC号码
+            ic = agent.get('ic', agent.get('IC', agent.get('contact', agent.get('Contact', ''))))
             
             if name:
-                # 简化显示，不再显示佣金信息
-                keyboard.append([InlineKeyboardButton(f"🤝 {name}", callback_data=f"agent_{name}")])
+                # 在回调数据中包含IC号码
+                keyboard.append([InlineKeyboardButton(f"🤝 {name}", callback_data=f"agent_{name}_{ic}")])
         
         # 添加取消按钮
         keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="back_main")])
