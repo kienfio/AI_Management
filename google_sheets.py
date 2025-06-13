@@ -22,7 +22,7 @@ SHEET_NAMES = {
     'pic': 'Person in Charge'
 }
 
-SALES_HEADERS = ['Date', 'Personal in Charge', 'Amount', 'Bill To', 'Client Type', 'Commission Rate', 'Commission Amount', 'Agent Name', 'Agent IC', 'Notes']
+SALES_HEADERS = ['Date', 'Personal in Charge', 'Amount', 'Bill To', 'Type', 'Commission Rate', 'Commission Amount', 'Agent Name', 'Agent IC', 'Notes']
 EXPENSES_HEADERS = ['Date', 'Expense Type', 'Supplier', 'Amount', 'Category', 'Notes', 'Receipt']
 AGENTS_HEADERS = ['Name', 'IC', 'Phone']
 SUPPLIERS_HEADERS = ['Name', 'Contact', 'Phone', 'Email', 'Products/Services', 'Status']
@@ -194,7 +194,7 @@ class GoogleSheetsManager:
                 data.get('person', ''),
                 data.get('amount', 0),
                 data.get('bill_to', ''),
-                data.get('client_type', ''),
+                data.get('type', ''),
                 commission_rate_display,  # 显示为百分比
                 data.get('commission_amount', 0),
                 data.get('agent_name', ''),  # 代理商名称
@@ -253,8 +253,8 @@ class GoogleSheetsManager:
                     'date': date,
                     'person': record.get('Personal in Charge', ''),
                     'amount': self._parse_number(record.get('Amount', 0)),
-                    'bill_to': record.get('Bill To', ''),  # 添加Bill to字段
-                    'client_type': record.get('Client Type', ''),
+                    'bill_to': record.get('Bill To', ''),
+                    'type': record.get('Type', ''),
                     'commission_rate': self._parse_number(record.get('Commission Rate', 0)),
                     'commission': self._parse_number(record.get('Commission Amount', 0)),
                     'agent_name': record.get('Agent Name', ''),
