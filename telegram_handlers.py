@@ -517,52 +517,62 @@ async def show_agent_selection(update: Update, context: ContextTypes.DEFAULT_TYP
 
 # 创建一个辅助函数来显示确认信息
 async def show_sales_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """显示销售记录确认信息"""
+    """显示销售确认信息"""
+    # 获取数据
+    person = context.user_data['sales_person']
+    amount = context.user_data['sales_amount']
+    client_type = context.user_data['sales_client']
+    bill_to = context.user_data.get('bill_to', '')
+    
+    # 获取佣金信息
+    commission_amount = context.user_data['sales_commission']
+    commission_rate = context.user_data.get('commission_rate', 0)
+    commission_type = context.user_data.get('commission_type', '')
+    
+    # 获取代理商信息
+    agent_info = ""
+    if client_type == "Agent" and 'sales_agent' in context.user_data:
+        agent_info = context.user_data['sales_agent']
+    
+    # 构建确认消息
+    confirm_message = f"""
+💼 <b>SALES CONFIRMATION</b>
+
+👤 <b>Personal in Charge:</b> {person}
+💰 <b>Amount:</b> RM{amount:,.2f}
+📝 <b>Bill to:</b> {bill_to}
+🏢 <b>Type:</b> {client_type}
+"""
+
+    if agent_info:
+        confirm_message += f"🧑‍💼 <b>Agent:</b> {agent_info}\n"
+    
+    # 添加佣金信息
+    if commission_type == 'percent':
+        confirm_message += f"💵 <b>Commission:</b> RM{commission_amount:,.2f} ({commission_rate*100}%)\n"
+    else:
+        confirm_message += f"💵 <b>Commission:</b> RM{commission_amount:,.2f} (Fixed)\n"
+    
+    confirm_message += "\n<b>Please confirm the information:</b>"
+    
+    # 添加确认按钮
     keyboard = [
         [InlineKeyboardButton("✅ Save", callback_data="sales_save")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="back_main")]
+        [InlineKeyboardButton("❌ Cancel", callback_data="back_sales")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    # 获取数据
-    amount = context.user_data['sales_amount']
-    client_type = context.user_data['sales_client']
-    commission = context.user_data['sales_commission']
-    commission_rate = context.user_data.get('commission_rate', 0) * 100
-    person = context.user_data['sales_person']
-    agent = context.user_data.get('sales_agent', '')
-    bill_to = context.user_data.get('bill_to', '')
-    
-    # 构建确认消息
-    if client_type == "Agent":
-        client_display = f"{client_type}: {agent}"
-        commission_display = f"💵 <b>Commission:</b> RM{commission:,.2f} ({commission_rate:.1f}%)"
-    else:
-        client_display = client_type
-        commission_display = ""  # 公司类型不显示佣金信息
-    
-    confirm_message = f"""
-📊 <b>INVOICE CONFIRMATION</b>
-
-👤 <b>Person in Charge:</b> {person}
-💰 <b>Amount:</b> RM{amount:,.2f}
-📝 <b>Bill to:</b> {bill_to}
-🎯 <b>Client Type:</b> {client_display}
-{commission_display}
-
-<b>Please confirm the information:</b>
-    """
-    
+    # 处理不同类型的更新
     if update.callback_query:
+        await update.callback_query.answer()
         await update.callback_query.edit_message_text(
             confirm_message,
             parse_mode=ParseMode.HTML,
             reply_markup=reply_markup
         )
     else:
-        await update.message.reply_text(
+        await update.message.reply_html(
             confirm_message,
-            parse_mode=ParseMode.HTML,
             reply_markup=reply_markup
         )
     
@@ -578,13 +588,12 @@ async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         sheets_manager = SheetsManager()
         
         # 准备数据
-        client_type = context.user_data['sales_client']
+        client_type = context.user_data['sales_client']  # "Agent" 或 "Company"
         agent_name = ""
         agent_ic = ""
         
         if client_type == "Agent" and 'sales_agent' in context.user_data:
             agent_info = context.user_data['sales_agent']
-            client_type = f"{client_type}: {agent_info}"
             
             # 获取代理商详细信息
             agents = sheets_manager.get_agents()
@@ -609,7 +618,7 @@ async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             'person': context.user_data['sales_person'],
             'amount': context.user_data['sales_amount'],
             'bill_to': bill_to,
-            'client_type': client_type,
+            'type': client_type,  # 简化为 "Agent" 或 "Company"
             'commission_rate': context.user_data.get('commission_rate', 0),
             'commission_amount': context.user_data['sales_commission'],
             'agent_name': agent_name,
@@ -630,6 +639,7 @@ async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 👤 <b>Personal in Charge:</b> {person}
 💰 <b>Amount:</b> RM{amount:,.2f}
 📝 <b>Bill to:</b> {bill_to}
+🏢 <b>Type:</b> {client_type}
 """
 
         if agent_name:
@@ -680,6 +690,7 @@ async def sales_list_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 message += f"📅 <b>Date:</b> {record['date']}\n"
                 message += f"👤 <b>PIC:</b> {record['person']}\n"
                 message += f"💰 <b>Amount:</b> RM{record['amount']:,.2f}\n"
+                message += f"🏢 <b>Type:</b> {record.get('type', '')}\n"
                 
                 if record.get('agent_name'):
                     message += f"🧑‍💼 <b>Agent:</b> {record['agent_name']}\n"
