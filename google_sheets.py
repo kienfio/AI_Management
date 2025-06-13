@@ -23,7 +23,7 @@ SHEET_NAMES = {
 }
 
 SALES_HEADERS = ['Date', 'Person', 'Amount', 'Bill To', 'Client Type', 'Commission Rate', 'Commission Amount', 'Notes']
-EXPENSES_HEADERS = ['Date', 'Expense Type', 'Supplier', 'Amount', 'Category', 'Notes']
+EXPENSES_HEADERS = ['Date', 'Expense Type', 'Supplier', 'Amount', 'Category', 'Notes', 'Receipt']
 AGENTS_HEADERS = ['Name', 'IC', 'Phone']
 SUPPLIERS_HEADERS = ['Name', 'Contact', 'Phone', 'Email', 'Products/Services', 'Status']
 WORKERS_HEADERS = ['Name', 'Contact', 'Phone', 'Position', 'Status']
@@ -292,7 +292,8 @@ class GoogleSheetsManager:
                 data.get('supplier', ''),
                 data.get('amount', 0),
                 data.get('category', ''),
-                data.get('description', '')
+                data.get('description', ''),
+                data.get('receipt', '')  # 添加收据链接字段
             ]
             
             worksheet.append_row(row_data)
@@ -348,7 +349,8 @@ class GoogleSheetsManager:
                     'supplier': record.get('Supplier', ''),
                     'amount': self._parse_number(record.get('Amount', 0)),
                     'category': record.get('Category', ''),
-                    'notes': record.get('Notes', '')
+                    'notes': record.get('Notes', ''),
+                    'receipt': record.get('Receipt', '')  # 添加收据链接字段
                 }
                 
                 formatted_records.append(formatted_record)
