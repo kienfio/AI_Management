@@ -291,7 +291,7 @@ async def sales_client_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     try:
         # 获取代理商列表
         sheets_manager = SheetsManager()
-        agents = sheets_manager.get_agents(active_only=True)
+        agents = sheets_manager.get_agents(active_only=False)  # 不需要过滤激活状态
         
         if not agents:
             # 如果没有代理商数据，显示提示信息
@@ -309,23 +309,12 @@ async def sales_client_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         # 创建代理商选择按钮
         keyboard = []
         for agent in agents:
-            # 使用姓名作为按钮文本，兼容'姓名'和'name'字段
-            name = agent.get('姓名', agent.get('name', ''))
+            # 使用姓名作为按钮文本
+            name = agent.get('name', agent.get('Name', ''))
             
-            # 获取佣金比例，兼容'佣金比例'和'commission_rate'字段
-            commission_rate = agent.get('佣金比例', agent.get('commission_rate', ''))
-            if isinstance(commission_rate, float):
-                # 如果是浮点数，转换为百分比字符串
-                commission_display = f"{commission_rate*100:.1f}%"
-            else:
-                commission_display = str(commission_rate)
-            
-            display_text = f"{name}"
-            if commission_display:
-                display_text += f" ({commission_display})"
-                
             if name:
-                keyboard.append([InlineKeyboardButton(f"🤝 {display_text}", callback_data=f"agent_{name}_{commission_rate}")])
+                # 简化显示，不再显示佣金信息
+                keyboard.append([InlineKeyboardButton(f"🤝 {name}", callback_data=f"agent_{name}")])
         
         # 添加取消按钮
         keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="back_main")])
@@ -1834,11 +1823,8 @@ async def setting_ic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         # 添加代理商，包含IC号码
         agent_data = {
             'name': name,
-            'contact': ic,  # IC号码
-            'phone': '',    # 电话（可选）
-            'email': '',    # 邮箱（可选）
-            'commission_rate': 0,  # 默认佣金比例
-            'status': '激活'
+            'ic': ic,    # IC号码
+            'phone': ''  # 电话（可选）
         }
         
         sheets_manager.add_agent(agent_data)
