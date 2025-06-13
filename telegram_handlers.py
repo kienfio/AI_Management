@@ -463,12 +463,12 @@ async def show_agent_selection(update: Update, context: ContextTypes.DEFAULT_TYP
         
         if not agents:
             # 如果没有代理商数据，显示提示信息
-            keyboard = [[InlineKeyboardButton("⚙️ 创建代理商", callback_data="setting_create_agent")],
-                        [InlineKeyboardButton("❌ 取消", callback_data="back_main")]]
+            keyboard = [[InlineKeyboardButton("⚙️ Create Agent", callback_data="setting_create_agent")],
+                        [InlineKeyboardButton("❌ Cancel", callback_data="back_main")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await update.message.reply_text(
-                "⚠️ <b>未找到代理商数据</b>\n\n请先创建代理商后再使用此功能。",
+                "⚠️ <b>No agents found</b>\n\nPlease create an agent first.",
                 parse_mode=ParseMode.HTML,
                 reply_markup=reply_markup
             )
@@ -478,24 +478,23 @@ async def show_agent_selection(update: Update, context: ContextTypes.DEFAULT_TYP
         keyboard = []
         for agent in agents:
             # 使用姓名作为按钮文本
-            name = agent.get('姓名', '')
+            name = agent.get('name', agent.get('Name', ''))
             if name:
-                keyboard.append([InlineKeyboardButton(f"🤝 {name}", callback_data=f"agent_{name}")])
+                # 将代理商IC作为回调数据的一部分
+                ic = agent.get('ic', agent.get('IC', ''))
+                keyboard.append([InlineKeyboardButton(f"🤝 {name}", callback_data=f"agent_{name}_{ic}")])
         
         # 添加取消按钮
-        keyboard.append([InlineKeyboardButton("❌ 取消", callback_data="back_main")])
+        keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="back_main")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         # 显示佣金信息
         amount = context.user_data['sales_amount']
-        commission = context.user_data['sales_commission']
-        commission_rate = context.user_data.get('commission_rate', 0) * 100
         
         message = f"""
-💰 <b>总金额:</b> RM{amount:,.2f}
-💵 <b>佣金:</b> RM{commission:,.2f} ({commission_rate:.1f}%)
+💰 <b>Amount:</b> RM{amount:,.2f}
 
-🤝 <b>请选择代理商:</b>
+🤝 <b>Please select an agent:</b>
 """
         
         await update.message.reply_text(
@@ -510,7 +509,7 @@ async def show_agent_selection(update: Update, context: ContextTypes.DEFAULT_TYP
     except Exception as e:
         logger.error(f"获取代理商列表失败: {e}")
         await update.message.reply_text(
-            "❌ <b>获取代理商数据失败</b>\n\n请稍后再试。",
+            "❌ <b>Failed to get agent data</b>\n\nPlease try again later.",
             parse_mode=ParseMode.HTML
         )
         return ConversationHandler.END
@@ -593,23 +592,21 @@ async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         agent_ic = ""
         
         if client_type == "Agent" and 'sales_agent' in context.user_data:
-            agent_info = context.user_data['sales_agent']
+            agent_name = context.user_data['sales_agent']
             
-            # 获取代理商详细信息
-            agents = sheets_manager.get_agents()
-            for agent in agents:
-                if agent.get('name') == agent_info:
-                    agent_name = agent.get('name', '')
-                    agent_ic = agent.get('ic', '')
-                    break
+            # 直接从context获取IC，如果有的话
+            if 'agent_ic' in context.user_data:
+                agent_ic = context.user_data['agent_ic']
+            else:
+                # 如果没有，尝试从代理商列表中获取
+                agents = sheets_manager.get_agents()
+                for agent in agents:
+                    if agent.get('name') == agent_name:
+                        agent_ic = agent.get('ic', '')
+                        break
         
         # 获取佣金计算方式
         commission_type = context.user_data.get('commission_type', '')
-        commission_note = ""
-        if commission_type == 'percent':
-            commission_note = "Percentage based commission"
-        elif commission_type == 'fixed':
-            commission_note = "Fixed commission amount"
         
         bill_to = context.user_data.get('bill_to', '')
         
@@ -622,8 +619,7 @@ async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             'commission_rate': context.user_data.get('commission_rate', 0),
             'commission_amount': context.user_data['sales_commission'],
             'agent_name': agent_name,
-            'agent_ic': agent_ic,
-            'notes': f"Bill to: {bill_to}" + (f", {commission_note}" if commission_note else "")
+            'agent_ic': agent_ic
         }
         
         sheets_manager.add_sales_record(sales_data)
@@ -2306,19 +2302,24 @@ async def sales_agent_select_handler(update: Update, context: ContextTypes.DEFAU
     
     agent_data = query.data
     if agent_data.startswith("agent_"):
-        # 解析代理商数据 agent_{name}_{commission}
+        # 解析代理商数据 agent_{name}_{ic}_{commission}
         parts = agent_data[6:].split('_')
         if len(parts) >= 1:
             agent_name = parts[0]
             context.user_data['sales_agent'] = agent_name
             
+            # 保存代理商IC（如果有）
+            if len(parts) >= 2:
+                agent_ic = parts[1]
+                context.user_data['agent_ic'] = agent_ic
+            
             # 获取代理商默认佣金比例（如果有）
             default_commission = ""
             default_commission_rate = 0
-            if len(parts) >= 2:
+            if len(parts) >= 3:
                 try:
                     # 尝试将佣金比例转换为数字
-                    commission_str = parts[1]
+                    commission_str = parts[2]
                     # 处理可能的百分比字符串
                     if isinstance(commission_str, str) and '%' in commission_str:
                         default_commission_rate = float(commission_str.replace('%', '')) / 100
@@ -2328,8 +2329,8 @@ async def sales_agent_select_handler(update: Update, context: ContextTypes.DEFAU
                     # 格式化显示
                     default_commission = f"{default_commission_rate*100:.1f}%"
                 except (ValueError, TypeError):
-                    logger.error(f"无法解析佣金比例: {parts[1]}")
-                    default_commission = parts[1]
+                    logger.error(f"无法解析佣金比例: {parts[2]}")
+                    default_commission = parts[2]
             
             # 显示佣金计算方式选择界面
             amount = context.user_data['sales_amount']
@@ -2355,6 +2356,11 @@ async def sales_agent_select_handler(update: Update, context: ContextTypes.DEFAU
             
             message = f"""
 🤝 <b>Agent:</b> {agent_name}
+"""
+            if context.user_data.get('agent_ic'):
+                message += f"🪪 <b>IC:</b> {context.user_data['agent_ic']}\n"
+                
+            message += f"""
 💰 <b>Amount:</b> RM{amount:,.2f}
 {f"💵 <b>Default Commission Rate:</b> {default_commission}" if default_commission else ""}
 {default_commission_amount if default_commission_amount else ""}
