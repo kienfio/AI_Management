@@ -761,29 +761,24 @@ async def cost_type_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             sheets_manager = SheetsManager()
             suppliers = sheets_manager.get_suppliers(active_only=True)
             
-            if not suppliers:
-                # 如果没有供应商数据，显示提示信息
-                keyboard = [[InlineKeyboardButton("⚙️ Create Supplier", callback_data="setting_create_supplier")],
-                            [InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                
-                await query.edit_message_text(
-                    "⚠️ <b>No suppliers found</b>\n\nPlease create a supplier first.",
-                    parse_mode=ParseMode.HTML,
-                    reply_markup=reply_markup
-                )
-                return ConversationHandler.END
-            
             # 创建供应商选择按钮
             keyboard = []
-            for supplier in suppliers:
-                # 使用供应商名称作为按钮文本
-                name = supplier.get('供应商名称', '')
-                if name:
-                    keyboard.append([InlineKeyboardButton(f"🏭 {name}", callback_data=f"supplier_{name}")])
+            
+            # 从Google表格中获取的供应商
+            if suppliers:
+                for supplier in suppliers:
+                    # 使用供应商名称作为按钮文本
+                    name = supplier.get('Name', supplier.get('name', ''))
+                    if name:
+                        keyboard.append([InlineKeyboardButton(f"🏭 {name}", callback_data=f"supplier_{name}")])
+            
+            # 如果没有供应商，显示一条消息
+            if not keyboard:
+                keyboard.append([InlineKeyboardButton("ℹ️ No suppliers found", callback_data="no_action")])
             
             # 添加自定义输入选项
             keyboard.append([InlineKeyboardButton("✏️ Other (Custom Input)", callback_data="supplier_other")])
+            keyboard.append([InlineKeyboardButton("⚙️ Create Supplier", callback_data="setting_create_supplier")])
             
             # 添加取消按钮
             keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="back_cost")])
@@ -990,6 +985,47 @@ async def cost_desc_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     
     return COST_AMOUNT
 
+async def cost_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理收据上传"""
+    # 这里可以处理照片或文件
+    if update.message.photo:
+        # 如果是照片，获取最高质量的照片ID和文件
+        file_id = update.message.photo[-1].file_id
+        context.user_data['cost_receipt'] = file_id
+        context.user_data['cost_receipt_type'] = 'photo'
+        
+        # 获取文件对象
+        file = await context.bot.get_file(file_id)
+        # 记录文件路径，稍后会通过 Telegram API 访问
+        context.user_data['receipt_file_path'] = file.file_path
+        
+        # 生成直接访问链接 (通过 Telegram API)
+        # 格式: https://api.telegram.org/file/bot<token>/<file_path>
+        # 注意: 这个链接会包含bot token，不应该直接显示给用户
+        await update.message.reply_text("✅ Receipt photo uploaded successfully!")
+        
+    elif update.message.document:
+        # 如果是文件，获取文件ID
+        file_id = update.message.document.file_id
+        context.user_data['cost_receipt'] = file_id
+        context.user_data['cost_receipt_type'] = 'document'
+        
+        # 获取文件对象
+        file = await context.bot.get_file(file_id)
+        # 记录文件路径
+        context.user_data['receipt_file_path'] = file.file_path
+        
+        await update.message.reply_text("✅ Receipt document uploaded successfully!")
+    else:
+        # 如果没有上传图片或文档，提示用户
+        await update.message.reply_html(
+            "⚠️ <b>Please upload a photo or document as receipt.</b>\n\nOr type /skip to continue without receipt."
+        )
+        return COST_RECEIPT
+    
+    # 继续到确认页面
+    return await show_cost_confirmation(update, context)
+
 async def cost_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """处理费用保存"""
     query = update.callback_query
@@ -1001,7 +1037,15 @@ async def cost_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         amount = context.user_data['cost_amount']
         supplier = context.user_data.get('cost_supplier', '')
         desc = context.user_data.get('cost_desc', '')
-        receipt = context.user_data.get('cost_receipt', '')
+        
+        # 处理收据链接
+        receipt_url = ""
+        if 'receipt_file_path' in context.user_data:
+            # 使用bot token和文件路径生成URL
+            bot_token = context.bot.token
+            file_path = context.user_data['receipt_file_path']
+            # 创建直接访问链接
+            receipt_url = f"https://api.telegram.org/file/bot{bot_token}/{file_path}"
         
         # 记录到Google Sheets
         date_str = datetime.now().strftime('%Y-%m-%d')
@@ -1013,14 +1057,32 @@ async def cost_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             'supplier': supplier,
             'amount': amount,
             'category': supplier if supplier else 'Other',
-            'description': desc
+            'description': desc,
+            'receipt': receipt_url  # 添加收据URL
         }
         sheets_manager.add_expense_record(data)
         
-        # 显示成功消息
+        # 构建成功消息
+        success_message = f"""
+✅ <b>Expense has been saved successfully!</b>
+
+📋 <b>Type:</b> {cost_type}
+"""
+        if supplier:
+            success_message += f"🏭 <b>Supplier:</b> {supplier}\n"
+        success_message += f"💰 <b>Amount:</b> RM{amount:,.2f}\n"
+        
+        if receipt_url:
+            success_message += "📎 <b>Receipt:</b> Uploaded successfully\n"
+        
+        # 添加返回按钮
+        keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="back_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
         await query.edit_message_text(
-            "✅ <b>Expense has been saved successfully!</b>",
-            parse_mode=ParseMode.HTML
+            success_message,
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
         )
         
         # 清除用户数据
@@ -1037,34 +1099,12 @@ async def cost_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         return ConversationHandler.END
 
-async def cost_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理收据上传"""
-    # 这里可以处理照片或文件
-    if update.message.photo:
-        # 如果是照片，获取最高质量的照片ID
-        file_id = update.message.photo[-1].file_id
-        context.user_data['cost_receipt'] = file_id
-        context.user_data['cost_receipt_type'] = 'photo'
-    elif update.message.document:
-        # 如果是文件，获取文件ID
-        file_id = update.message.document.file_id
-        context.user_data['cost_receipt'] = file_id
-        context.user_data['cost_receipt_type'] = 'document'
-    else:
-        # 如果没有上传图片或文档，提示用户
-        await update.message.reply_html(
-            "⚠️ <b>Please upload a photo or document as receipt.</b>\n\nOr type /skip to continue without receipt."
-        )
-        return COST_RECEIPT
-    
-    # 继续到确认页面
-    return await show_cost_confirmation(update, context)
-
 async def show_cost_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """显示费用确认信息"""
     # 生成确认信息
     cost_type = context.user_data['cost_type']
     amount = context.user_data['cost_amount']
+    has_receipt = 'receipt_file_path' in context.user_data
     
     keyboard = [
         [InlineKeyboardButton("✅ Save", callback_data="cost_save")],
@@ -1081,9 +1121,12 @@ async def show_cost_confirmation(update: Update, context: ContextTypes.DEFAULT_T
 📋 <b>Type:</b> {cost_type}
 🏭 <b>Supplier:</b> {supplier}
 💰 <b>Amount:</b> RM{amount:,.2f}
-
-<b>Please confirm the information:</b>
-        """
+"""
+        if has_receipt:
+            confirm_message += "📎 <b>Receipt:</b> Uploaded\n"
+            
+        confirm_message += "\n<b>Please confirm the information:</b>"
+        
     elif cost_type.endswith("Bill") or cost_type == "Billing":
         desc = context.user_data.get('cost_desc', '')
         
@@ -1094,9 +1137,12 @@ async def show_cost_confirmation(update: Update, context: ContextTypes.DEFAULT_T
 
 📋 <b>Type:</b> {cost_type}
 💰 <b>Amount:</b> RM{amount:,.2f}
-
-<b>Please confirm the information:</b>
-            """
+"""
+            if has_receipt:
+                confirm_message += "📎 <b>Receipt:</b> Uploaded\n"
+                
+            confirm_message += "\n<b>Please confirm the information:</b>"
+            
         # 如果是自定义账单类型，显示描述
         elif cost_type.startswith("Other Bill:"):
             confirm_message = f"""
@@ -1105,9 +1151,12 @@ async def show_cost_confirmation(update: Update, context: ContextTypes.DEFAULT_T
 📋 <b>Type:</b> Other Bill
 📝 <b>Description:</b> {desc}
 💰 <b>Amount:</b> RM{amount:,.2f}
-
-<b>Please confirm the information:</b>
-            """
+"""
+            if has_receipt:
+                confirm_message += "📎 <b>Receipt:</b> Uploaded\n"
+                
+            confirm_message += "\n<b>Please confirm the information:</b>"
+            
         # 传统 Billing 类型
         else:
             confirm_message = f"""
@@ -1116,18 +1165,23 @@ async def show_cost_confirmation(update: Update, context: ContextTypes.DEFAULT_T
 📋 <b>Type:</b> {cost_type}
 📝 <b>Item:</b> {desc}
 💰 <b>Amount:</b> RM{amount:,.2f}
-
-<b>Please confirm the information:</b>
-            """
+"""
+            if has_receipt:
+                confirm_message += "📎 <b>Receipt:</b> Uploaded\n"
+                
+            confirm_message += "\n<b>Please confirm the information:</b>"
+            
     else:  # Worker Salary
         confirm_message = f"""
 💵 <b>EXPENSE CONFIRMATION</b>
 
 📋 <b>Type:</b> {cost_type}
 💰 <b>Amount:</b> RM{amount:,.2f}
-
-<b>Please confirm the information:</b>
-        """
+"""
+        if has_receipt:
+            confirm_message += "📎 <b>Receipt:</b> Uploaded\n"
+            
+        confirm_message += "\n<b>Please confirm the information:</b>"
     
     try:
         if update.message:
@@ -1385,6 +1439,29 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
                 logger.error(f"发送错误消息失败: {e2}")
             return ConversationHandler.END
     
+    # 从费用录入界面创建供应商
+    elif query.data == "setting_create_supplier":
+        # 保存当前状态，以便稍后恢复
+        if 'cost_type' in context.user_data:
+            context.user_data['previous_state'] = 'cost'
+            
+        # 调用设置函数
+        context.user_data['setting_category'] = 'supplier'
+        keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "🏭 <b>Create Supplier</b>\n\n<b>Please enter supplier name:</b>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+        return SETTING_NAME
+    
+    # 处理无操作的回调
+    elif query.data == "no_action":
+        # 不做任何操作，仅关闭回调
+        return
+    
     # 各功能菜单回调
     elif query.data == "menu_sales":
         # 这里不做任何处理，因为menu_sales回调已经在ConversationHandler的entry_points中处理
@@ -1420,7 +1497,18 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     
     # 费用管理回调
     elif query.data == "back_cost":
-        return await cost_menu(update, context)
+        # 检查是否从设置页面返回
+        if context.user_data.get('previous_state') == 'cost':
+            # 清除设置相关的数据
+            for key in list(context.user_data.keys()):
+                if key.startswith('setting_'):
+                    context.user_data.pop(key)
+            context.user_data.pop('previous_state', None)
+            
+            # 返回费用菜单
+            return await cost_menu(update, context)
+        else:
+            return await cost_menu(update, context)
     elif query.data in ["cost_purchasing", "cost_billing", "cost_salary"]:
         return await cost_type_handler(update, context)
     elif query.data.startswith("billing_"):
