@@ -988,43 +988,51 @@ async def cost_desc_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def cost_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """处理收据上传"""
     # 这里可以处理照片或文件
-    if update.message.photo:
-        # 如果是照片，获取最高质量的照片ID和文件
-        file_id = update.message.photo[-1].file_id
-        context.user_data['cost_receipt'] = file_id
-        context.user_data['cost_receipt_type'] = 'photo'
+    try:
+        if update.message.photo:
+            # 如果是照片，获取最高质量的照片ID和文件
+            file_id = update.message.photo[-1].file_id
+            context.user_data['cost_receipt'] = file_id
+            context.user_data['cost_receipt_type'] = 'photo'
+            
+            # 获取文件对象
+            file = await context.bot.get_file(file_id)
+            # 直接生成完整URL并保存
+            bot_token = context.bot.token
+            file_url = f"https://api.telegram.org/file/bot{bot_token}/{file.file_path}"
+            context.user_data['receipt_file_path'] = file_url
+            
+            logger.info(f"收据照片已上传，URL: {file_url}")
+            await update.message.reply_text("✅ Receipt photo uploaded successfully!")
+            
+        elif update.message.document:
+            # 如果是文件，获取文件ID
+            file_id = update.message.document.file_id
+            context.user_data['cost_receipt'] = file_id
+            context.user_data['cost_receipt_type'] = 'document'
+            
+            # 获取文件对象
+            file = await context.bot.get_file(file_id)
+            # 直接生成完整URL并保存
+            bot_token = context.bot.token
+            file_url = f"https://api.telegram.org/file/bot{bot_token}/{file.file_path}"
+            context.user_data['receipt_file_path'] = file_url
+            
+            logger.info(f"收据文档已上传，URL: {file_url}")
+            await update.message.reply_text("✅ Receipt document uploaded successfully!")
+        else:
+            # 如果没有上传图片或文档，提示用户
+            await update.message.reply_html(
+                "⚠️ <b>Please upload a photo or document as receipt.</b>\n\nOr type /skip to continue without receipt."
+            )
+            return COST_RECEIPT
         
-        # 获取文件对象
-        file = await context.bot.get_file(file_id)
-        # 记录文件路径，稍后会通过 Telegram API 访问
-        context.user_data['receipt_file_path'] = file.file_path
-        
-        # 生成直接访问链接 (通过 Telegram API)
-        # 格式: https://api.telegram.org/file/bot<token>/<file_path>
-        # 注意: 这个链接会包含bot token，不应该直接显示给用户
-        await update.message.reply_text("✅ Receipt photo uploaded successfully!")
-        
-    elif update.message.document:
-        # 如果是文件，获取文件ID
-        file_id = update.message.document.file_id
-        context.user_data['cost_receipt'] = file_id
-        context.user_data['cost_receipt_type'] = 'document'
-        
-        # 获取文件对象
-        file = await context.bot.get_file(file_id)
-        # 记录文件路径
-        context.user_data['receipt_file_path'] = file.file_path
-        
-        await update.message.reply_text("✅ Receipt document uploaded successfully!")
-    else:
-        # 如果没有上传图片或文档，提示用户
-        await update.message.reply_html(
-            "⚠️ <b>Please upload a photo or document as receipt.</b>\n\nOr type /skip to continue without receipt."
-        )
+        # 继续到确认页面
+        return await show_cost_confirmation(update, context)
+    except Exception as e:
+        logger.error(f"处理收据上传失败: {e}")
+        await update.message.reply_text("❌ Error processing receipt. Please try again.")
         return COST_RECEIPT
-    
-    # 继续到确认页面
-    return await show_cost_confirmation(update, context)
 
 async def cost_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """处理费用保存"""
@@ -1041,11 +1049,10 @@ async def cost_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         # 处理收据链接
         receipt_url = ""
         if 'receipt_file_path' in context.user_data:
-            # 使用bot token和文件路径生成URL
-            bot_token = context.bot.token
-            file_path = context.user_data['receipt_file_path']
-            # 创建直接访问链接
-            receipt_url = f"https://api.telegram.org/file/bot{bot_token}/{file_path}"
+            # 直接使用已生成的完整URL
+            receipt_url = context.user_data['receipt_file_path']
+            # 记录使用的链接用于调试
+            logger.info(f"使用的收据链接: {receipt_url}")
         
         # 记录到Google Sheets
         date_str = datetime.now().strftime('%Y-%m-%d')
