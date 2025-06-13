@@ -987,51 +987,51 @@ async def cost_desc_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def cost_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """处理收据上传"""
-    # 这里可以处理照片或文件
     try:
+        # 获取文件
         if update.message.photo:
-            # 如果是照片，获取最高质量的照片ID和文件
             file_id = update.message.photo[-1].file_id
-            context.user_data['cost_receipt'] = file_id
-            context.user_data['cost_receipt_type'] = 'photo'
-            
-            # 获取文件对象
-            file = await context.bot.get_file(file_id)
-            # 直接生成完整URL并保存
-            bot_token = context.bot.token
-            file_url = f"https://api.telegram.org/file/bot{bot_token}/{file.file_path}"
-            context.user_data['receipt_file_path'] = file_url
-            
-            logger.info(f"收据照片已上传，URL: {file_url}")
-            await update.message.reply_text("✅ Receipt photo uploaded successfully!")
-            
+            file_type = 'photo'
         elif update.message.document:
-            # 如果是文件，获取文件ID
             file_id = update.message.document.file_id
-            context.user_data['cost_receipt'] = file_id
-            context.user_data['cost_receipt_type'] = 'document'
-            
-            # 获取文件对象
-            file = await context.bot.get_file(file_id)
-            # 直接生成完整URL并保存
-            bot_token = context.bot.token
-            file_url = f"https://api.telegram.org/file/bot{bot_token}/{file.file_path}"
-            context.user_data['receipt_file_path'] = file_url
-            
-            logger.info(f"收据文档已上传，URL: {file_url}")
-            await update.message.reply_text("✅ Receipt document uploaded successfully!")
+            file_type = 'document'
         else:
-            # 如果没有上传图片或文档，提示用户
-            await update.message.reply_html(
-                "⚠️ <b>Please upload a photo or document as receipt.</b>\n\nOr type /skip to continue without receipt."
-            )
+            await update.message.reply_text("⚠️ 请上传照片或文档")
             return COST_RECEIPT
+        
+        # 获取文件对象
+        file = await context.bot.get_file(file_id)
+        
+        # 下载文件内容
+        file_stream = io.BytesIO()
+        await file.download_to_memory(out=file_stream)
+        file_stream.seek(0)  # 重置指针位置
+        
+        # 生成文件名
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_name = f"receipt_{timestamp}.jpg" if file_type == 'photo' else file.file_name
+        
+        # 上传到Google Drive
+        sheets_manager = SheetsManager()
+        receipt_link = sheets_manager.upload_receipt_to_drive(
+            file_stream, 
+            file_name,
+            file.mime_type if hasattr(file, 'mime_type') else 'image/jpeg'
+        )
+        
+        if receipt_link:
+            context.user_data['cost_receipt'] = receipt_link
+            await update.message.reply_text(f"✅ 收据已上传: {receipt_link}")
+        else:
+            await update.message.reply_text("❌ 收据上传失败")
+            context.user_data['cost_receipt'] = None
         
         # 继续到确认页面
         return await show_cost_confirmation(update, context)
+        
     except Exception as e:
-        logger.error(f"处理收据上传失败: {e}")
-        await update.message.reply_text("❌ Error processing receipt. Please try again.")
+        logger.error(f"处理收据时出错: {e}")
+        await update.message.reply_text("❌ 处理收据时出错，请重试")
         return COST_RECEIPT
 
 async def cost_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1045,14 +1045,7 @@ async def cost_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         amount = context.user_data['cost_amount']
         supplier = context.user_data.get('cost_supplier', '')
         desc = context.user_data.get('cost_desc', '')
-        
-        # 处理收据链接
-        receipt_url = ""
-        if 'receipt_file_path' in context.user_data:
-            # 直接使用已生成的完整URL
-            receipt_url = context.user_data['receipt_file_path']
-            # 记录使用的链接用于调试
-            logger.info(f"使用的收据链接: {receipt_url}")
+        receipt_link = context.user_data.get('cost_receipt', '')
         
         # 记录到Google Sheets
         date_str = datetime.now().strftime('%Y-%m-%d')
@@ -1065,7 +1058,7 @@ async def cost_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             'amount': amount,
             'category': supplier if supplier else 'Other',
             'description': desc,
-            'receipt': receipt_url  # 添加收据URL
+            'receipt': receipt_link  # 使用Google Drive链接
         }
         sheets_manager.add_expense_record(data)
         
@@ -1079,7 +1072,7 @@ async def cost_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             success_message += f"🏭 <b>Supplier:</b> {supplier}\n"
         success_message += f"💰 <b>Amount:</b> RM{amount:,.2f}\n"
         
-        if receipt_url:
+        if receipt_link:
             success_message += "📎 <b>Receipt:</b> Uploaded successfully\n"
         
         # 添加返回按钮
@@ -1111,7 +1104,7 @@ async def show_cost_confirmation(update: Update, context: ContextTypes.DEFAULT_T
     # 生成确认信息
     cost_type = context.user_data['cost_type']
     amount = context.user_data['cost_amount']
-    has_receipt = 'receipt_file_path' in context.user_data
+    has_receipt = 'cost_receipt' in context.user_data
     
     keyboard = [
         [InlineKeyboardButton("✅ Save", callback_data="cost_save")],
@@ -1525,6 +1518,9 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
         return ConversationHandler.END
     elif query.data.startswith("supplier_"):
         return await cost_supplier_handler(update, context)
+    elif query.data == "skip_receipt":
+        # 跳过收据上传，直接显示确认信息
+        return await show_cost_confirmation(update, context)
     
     # 报表生成回调
     elif query.data == "back_report":
@@ -2342,12 +2338,16 @@ async def receipt_upload_prompt(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     await query.answer()
     
-    keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
+    # 提示用户上传收据
+    keyboard = [
+        [InlineKeyboardButton("⏭️ Skip", callback_data="skip_receipt")]
+    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
-        "📸 <b>Please upload a photo or document as receipt</b>\n\n"
-        "<i>You can also use /skip to continue without receipt</i>",
+        "📸 <b>Upload Receipt</b>\n\n"
+        "Please upload a photo or document of the receipt.\n"
+        "Or click 'Skip' to continue without a receipt.",
         parse_mode=ParseMode.HTML,
         reply_markup=reply_markup
     )
