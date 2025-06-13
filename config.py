@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+from __future__ import print_function
 """
 Google Sheets API 集成 - 优化版本
 支持 Render 部署的环境变量配置
@@ -8,12 +9,11 @@ Google Sheets API 集成 - 优化版本
 import logging
 import json
 import os
+import os.path
 from datetime import datetime
 from typing import List, Dict, Optional, Any
 import gspread
 from google.oauth2.service_account import Credentials
-from __future__ import print_function
-import os.path
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
