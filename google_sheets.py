@@ -22,7 +22,7 @@ SHEET_NAMES = {
     'pic': 'Person in Charge'
 }
 
-SALES_HEADERS = ['Date', 'Personal in Charge', 'Amount', 'Bill To', 'Type', 'Commission Rate', 'Commission Amount', 'Agent Name', 'Agent IC', 'Notes']
+SALES_HEADERS = ['Date', 'Personal in Charge', 'Amount', 'Bill To', 'Type', 'Commission Rate', 'Commission Amount', 'Agent Name', 'Agent IC']
 EXPENSES_HEADERS = ['Date', 'Expense Type', 'Supplier', 'Amount', 'Category', 'Notes', 'Receipt']
 AGENTS_HEADERS = ['Name', 'IC', 'Phone']
 SUPPLIERS_HEADERS = ['Name', 'Contact', 'Phone', 'Email', 'Products/Services', 'Status']
@@ -199,7 +199,6 @@ class GoogleSheetsManager:
                 data.get('commission_amount', 0),
                 data.get('agent_name', ''),  # 代理商名称
                 data.get('agent_ic', ''),    # 代理商IC
-                data.get('notes', '')
             ]
             
             worksheet.append_row(row_data)
@@ -259,7 +258,6 @@ class GoogleSheetsManager:
                     'commission': self._parse_number(record.get('Commission Amount', 0)),
                     'agent_name': record.get('Agent Name', ''),
                     'agent_ic': record.get('Agent IC', ''),
-                    'notes': record.get('Notes', '')
                 }
                 
                 formatted_records.append(formatted_record)
