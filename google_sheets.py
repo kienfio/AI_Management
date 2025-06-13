@@ -24,7 +24,7 @@ SHEET_NAMES = {
 
 SALES_HEADERS = ['Date', 'Person', 'Amount', 'Bill To', 'Client Type', 'Commission Rate', 'Commission Amount', 'Notes']
 EXPENSES_HEADERS = ['Date', 'Expense Type', 'Supplier', 'Amount', 'Category', 'Notes']
-AGENTS_HEADERS = ['Name', 'Contact', 'Phone', 'Email', 'Commission Rate', 'Status']
+AGENTS_HEADERS = ['Name', 'IC', 'Phone']
 SUPPLIERS_HEADERS = ['Name', 'Contact', 'Phone', 'Email', 'Products/Services', 'Status']
 WORKERS_HEADERS = ['Name', 'Contact', 'Phone', 'Position', 'Status']
 PICS_HEADERS = ['Name', 'Contact', 'Phone', 'Department', 'Status']
@@ -373,19 +373,9 @@ class GoogleSheetsManager:
             # 确保所有字段都有默认值
             row_data = [
                 data.get('name', ''),          # Name
-                data.get('contact', ''),       # Contact
-                data.get('phone', ''),         # Phone
-                data.get('email', ''),         # Email
-                data.get('commission_rate', 0),# Commission Rate
-                data.get('status', '激活')      # Status
+                data.get('ic', data.get('contact', '')),  # IC
+                data.get('phone', '')          # Phone
             ]
-            
-            # 转换数据类型
-            try:
-                # 确保佣金比例是数字
-                row_data[4] = float(row_data[4]) if row_data[4] else 0
-            except (ValueError, TypeError):
-                row_data[4] = 0
             
             worksheet.append_row(row_data)
             logger.info(f"✅ 代理商添加成功: {data.get('name')}")
@@ -395,7 +385,7 @@ class GoogleSheetsManager:
             logger.error(f"❌ 添加代理商失败: {e}")
             return False
     
-    def get_agents(self, active_only: bool = True) -> List[Dict]:
+    def get_agents(self, active_only: bool = False) -> List[Dict]:
         """获取代理商列表"""
         try:
             worksheet = self.get_worksheet(SHEET_NAMES['agents'])
@@ -412,83 +402,34 @@ class GoogleSheetsManager:
             headers = all_values[0]
             data_rows = all_values[1:]
             
-            # 检查表头是否有重复
-            header_counts = {}
-            for header in headers:
-                if header in header_counts:
-                    header_counts[header] += 1
-                else:
-                    header_counts[header] = 1
-            
-            # 如果有重复表头，修改表头使其唯一
-            unique_headers = []
-            for i, header in enumerate(headers):
-                if header_counts[header] > 1:
-                    # 为重复的表头添加序号
-                    count = 0
-                    for j in range(i+1):
-                        if headers[j] == header:
-                            count += 1
-                    if count > 1:  # 如果是第二个或更多的重复项
-                        unique_headers.append(f"{header}_{count}")
-                        continue
-                unique_headers.append(header)
-            
-            # 手动构建记录列表
-            records = []
+            # 处理记录
+            formatted_records = []
             for row in data_rows:
                 # 确保行的长度与表头一致
-                if len(row) < len(unique_headers):
-                    row.extend([''] * (len(unique_headers) - len(row)))
-                elif len(row) > len(unique_headers):
-                    row = row[:len(unique_headers)]
+                if len(row) < len(headers):
+                    row.extend([''] * (len(headers) - len(row)))
+                elif len(row) > len(headers):
+                    row = row[:len(headers)]
                 
-                record = {unique_headers[i]: value for i, value in enumerate(row)}
-                records.append(record)
-            
-            # 处理记录，确保每条记录都有'姓名'和'佣金比例'字段
-            processed_records = []
-            for record in records:
-                # 处理姓名字段
+                # 创建记录字典
+                record = {}
+                for i, header in enumerate(headers):
+                    if i < len(row):
+                        record[header] = row[i]
+                    else:
+                        record[header] = ''
+                
+                # 添加兼容字段
                 if 'Name' in record:
-                    # 添加name字段作为姓名字段的别名
                     record['name'] = record['Name']
-                elif 'name' in record:
-                    record['Name'] = record['name']
+                if 'IC' in record:
+                    record['contact'] = record['IC']
+                if 'Phone' in record:
+                    record['phone'] = record['Phone']
                 
-                # 处理佣金比例字段
-                if 'Commission Rate' in record:
-                    # 尝试将佣金比例转换为浮点数
-                    try:
-                        if isinstance(record['Commission Rate'], str) and '%' in record['Commission Rate']:
-                            # 如果是百分比字符串，转换为小数
-                            record['commission_rate'] = float(record['Commission Rate'].replace('%', '')) / 100
-                        else:
-                            record['commission_rate'] = float(record['Commission Rate'])
-                    except (ValueError, TypeError):
-                        record['commission_rate'] = record['Commission Rate']
-                elif 'commission_rate' in record:
-                    try:
-                        if isinstance(record['commission_rate'], str) and '%' in record['commission_rate']:
-                            # 如果是百分比字符串，转换为小数
-                            record['Commission Rate'] = float(record['commission_rate'].replace('%', '')) / 100
-                        else:
-                            record['Commission Rate'] = float(record['commission_rate'])
-                    except (ValueError, TypeError):
-                        record['Commission Rate'] = record['commission_rate']
-                
-                processed_records.append(record)
+                formatted_records.append(record)
             
-            if active_only:
-                # 筛选激活状态的记录，兼容'status'字段
-                active_records = []
-                for r in processed_records:
-                    status = r.get('Status', '')
-                    if status == '激活':
-                        active_records.append(r)
-                return active_records
-            
-            return processed_records
+            return formatted_records
             
         except Exception as e:
             logger.error(f"❌ 获取代理商列表失败: {e}")
