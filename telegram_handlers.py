@@ -579,10 +579,20 @@ async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
         # 准备数据
         client_type = context.user_data['sales_client']
-        agent_info = ""
+        agent_name = ""
+        agent_ic = ""
+        
         if client_type == "Agent" and 'sales_agent' in context.user_data:
             agent_info = context.user_data['sales_agent']
             client_type = f"{client_type}: {agent_info}"
+            
+            # 获取代理商详细信息
+            agents = sheets_manager.get_agents()
+            for agent in agents:
+                if agent.get('name') == agent_info:
+                    agent_name = agent.get('name', '')
+                    agent_ic = agent.get('ic', '')
+                    break
         
         # 获取佣金计算方式
         commission_type = context.user_data.get('commission_type', '')
@@ -602,7 +612,9 @@ async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             'client_type': client_type,
             'commission_rate': context.user_data.get('commission_rate', 0),
             'commission_amount': context.user_data['sales_commission'],
-            'notes': f"Bill to: {bill_to}, Agent: {agent_info}" + (f", {commission_note}" if commission_note else "")
+            'agent_name': agent_name,
+            'agent_ic': agent_ic,
+            'notes': f"Bill to: {bill_to}" + (f", {commission_note}" if commission_note else "")
         }
         
         sheets_manager.add_sales_record(sales_data)
@@ -615,12 +627,18 @@ async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         success_message = f"""
 ✅ <b>Invoice saved successfully!</b>
 
-👤 <b>Person in Charge:</b> {person}
+👤 <b>Personal in Charge:</b> {person}
 💰 <b>Amount:</b> RM{amount:,.2f}
 📝 <b>Bill to:</b> {bill_to}
-💵 <b>Commission:</b> RM{commission:,.2f}
-🕒 <b>Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M')}
 """
+
+        if agent_name:
+            success_message += f"🧑‍💼 <b>Agent:</b> {agent_name}\n"
+            if agent_ic:
+                success_message += f"🪪 <b>Agent IC:</b> {agent_ic}\n"
+                
+        success_message += f"💵 <b>Commission:</b> RM{commission:,.2f}\n"
+        success_message += f"🕒 <b>Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M')}"
         
         keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="back_main")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -649,29 +667,42 @@ async def sales_list_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     try:
         sheets_manager = SheetsManager()
-        sales_records = await sheets_manager.get_recent_sales(limit=10)
+        sales_records = sheets_manager.get_sales_records()
+        
+        # 只显示最近10条记录
+        sales_records = sales_records[-10:] if len(sales_records) > 10 else sales_records
         
         if not sales_records:
-            message = "📋 暂无销售记录"
+            message = "📋 <b>No sales records found</b>"
         else:
-            message = "📋 *最近销售记录*\n\n"
+            message = "📋 <b>RECENT SALES RECORDS</b>\n\n"
             for record in sales_records:
-                message += f"📅 {record['date']}\n"
-                message += f"👤 {record['person']} | 🎯 {record['client_type']}\n"
-                message += f"💰 RM{record['amount']:,.2f} | 💵 RM{record['commission']:,.2f}\n\n"
+                message += f"📅 <b>Date:</b> {record['date']}\n"
+                message += f"👤 <b>PIC:</b> {record['person']}\n"
+                message += f"💰 <b>Amount:</b> RM{record['amount']:,.2f}\n"
+                
+                if record.get('agent_name'):
+                    message += f"🧑‍💼 <b>Agent:</b> {record['agent_name']}\n"
+                    if record.get('agent_ic'):
+                        message += f"🪪 <b>IC:</b> {record['agent_ic']}\n"
+                
+                message += f"💵 <b>Commission:</b> RM{record['commission']:,.2f}\n"
+                message += "-------------------------\n\n"
         
-        keyboard = [[InlineKeyboardButton("🔙 返回销售菜单", callback_data="menu_sales")]]
+        keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="back_main")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
             message,
-            parse_mode=ParseMode.MARKDOWN,
+            parse_mode=ParseMode.HTML,
             reply_markup=reply_markup
         )
         
     except Exception as e:
         logger.error(f"获取销售记录失败: {e}")
-        await query.edit_message_text("❌ 获取记录失败，请重试")
+        await query.edit_message_text("❌ Failed to retrieve records. Please try again.",
+                                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="back_main")]]))
+        return ConversationHandler.END
 
 # ====================================
 # 费用管理区 - 采购、水电、工资、其他支出
