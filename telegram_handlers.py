@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # ====================================
 
 # 销售记录状态
-SALES_PERSON, SALES_AMOUNT, SALES_BILL_TO, SALES_CLIENT, SALES_COMMISSION_TYPE, SALES_COMMISSION_PERCENT, SALES_COMMISSION_AMOUNT, SALES_AGENT_SELECT, SALES_CONFIRM = range(9)
+SALES_PERSON, SALES_AMOUNT, SALES_BILL_TO, SALES_CLIENT, SALES_COMMISSION_TYPE, SALES_COMMISSION_PERCENT, SALES_COMMISSION_AMOUNT, SALES_AGENT_SELECT, SALES_CONFIRM, SALES_INVOICE_PDF = range(10)
 
 # 费用管理状态
 COST_TYPE, COST_SUPPLIER, COST_AMOUNT, COST_DESC, COST_RECEIPT, COST_CONFIRM = range(6)
@@ -535,6 +535,9 @@ async def show_sales_confirmation(update: Update, context: ContextTypes.DEFAULT_
     if client_type == "Agent" and 'sales_agent' in context.user_data:
         agent_info = context.user_data['sales_agent']
     
+    # 检查是否已上传PDF
+    has_pdf = 'sales_invoice_pdf' in context.user_data and context.user_data['sales_invoice_pdf']
+    
     # 构建确认消息
     confirm_message = f"""
 💼 <b>SALES CONFIRMATION</b>
@@ -554,13 +557,22 @@ async def show_sales_confirmation(update: Update, context: ContextTypes.DEFAULT_
     else:
         confirm_message += f"💵 <b>Commission:</b> RM{commission_amount:,.2f} (Fixed)\n"
     
+    # 添加PDF信息
+    if has_pdf:
+        confirm_message += "📄 <b>Invoice PDF:</b> Uploaded\n"
+    
     confirm_message += "\n<b>Please confirm the information:</b>"
     
     # 添加确认按钮
-    keyboard = [
-        [InlineKeyboardButton("✅ Save", callback_data="sales_save")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="back_sales")]
-    ]
+    keyboard = []
+    
+    # 如果尚未上传PDF，添加上传PDF按钮
+    if not has_pdf:
+        keyboard.append([InlineKeyboardButton("📄 Upload Invoice PDF", callback_data="upload_invoice_pdf")])
+    
+    keyboard.append([InlineKeyboardButton("✅ Save", callback_data="sales_save")])
+    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="back_sales")])
+    
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     # 处理不同类型的更新
@@ -612,6 +624,15 @@ async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
         bill_to = context.user_data.get('bill_to', '')
         
+        # 获取PDF链接（如果有）
+        pdf_link = ""
+        if 'sales_invoice_pdf' in context.user_data:
+            pdf_data = context.user_data['sales_invoice_pdf']
+            if isinstance(pdf_data, dict) and 'public_link' in pdf_data:
+                pdf_link = pdf_data['public_link']
+            elif isinstance(pdf_data, str):
+                pdf_link = pdf_data
+        
         sales_data = {
             'date': datetime.now().strftime('%Y-%m-%d %H:%M'),
             'person': context.user_data['sales_person'],
@@ -621,7 +642,8 @@ async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             'commission_rate': context.user_data.get('commission_rate', 0),
             'commission_amount': context.user_data['sales_commission'],
             'agent_name': agent_name,
-            'agent_ic': agent_ic
+            'agent_ic': agent_ic,
+            'invoice_pdf': pdf_link  # 添加PDF链接
         }
         
         sheets_manager.add_sales_record(sales_data)
@@ -646,6 +668,11 @@ async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 success_message += f"🪪 <b>Agent IC:</b> {agent_ic}\n"
                 
         success_message += f"💵 <b>Commission:</b> RM{commission:,.2f}\n"
+        
+        # 添加PDF链接信息
+        if pdf_link:
+            success_message += f"📄 <b>Invoice PDF:</b> Uploaded\n"
+            
         success_message += f"🕒 <b>Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M')}"
         
         keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="back_main")]]
@@ -696,6 +723,11 @@ async def sales_list_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                         message += f"🪪 <b>IC:</b> {record['agent_ic']}\n"
                 
                 message += f"💵 <b>Commission:</b> RM{record['commission']:,.2f}\n"
+                
+                # 添加PDF链接信息
+                if record.get('invoice_pdf'):
+                    message += f"📄 <b>Invoice PDF:</b> Available\n"
+                    
                 message += "-------------------------\n\n"
         
         keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="back_main")]]
@@ -1728,7 +1760,13 @@ def get_conversation_handlers():
             SALES_AGENT_SELECT: [CallbackQueryHandler(sales_agent_select_handler, pattern="^agent_")],
             SALES_CONFIRM: [
                 CallbackQueryHandler(sales_save_handler, pattern="^sales_save$"),
+                CallbackQueryHandler(upload_invoice_pdf_prompt, pattern="^upload_invoice_pdf$"),
                 CallbackQueryHandler(callback_query_handler, pattern="^back_main$")
+            ],
+            SALES_INVOICE_PDF: [
+                MessageHandler(filters.Document.ALL, sales_invoice_pdf_handler),
+                CallbackQueryHandler(lambda u, c: show_sales_confirmation(u, c), pattern="^skip_invoice_pdf$"),
+                CallbackQueryHandler(lambda u, c: callback_query_handler(u, c), pattern="^back_sales$")
             ]
         },
         fallbacks=[
@@ -2479,3 +2517,96 @@ async def use_default_commission_handler(update: Update, context: ContextTypes.D
             parse_mode=ParseMode.HTML
         )
         return ConversationHandler.END
+
+async def upload_invoice_pdf_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """提示用户上传发票PDF"""
+    query = update.callback_query
+    await query.answer()
+    
+    # 提示用户上传PDF文件
+    keyboard = [
+        [InlineKeyboardButton("⏭️ Skip", callback_data="skip_invoice_pdf")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="back_sales")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        "📄 <b>Upload Invoice PDF</b>\n\n"
+        "Please upload a PDF file of the invoice.\n"
+        "Or click 'Skip' to continue without uploading.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=reply_markup
+    )
+    
+    return SALES_INVOICE_PDF
+
+async def sales_invoice_pdf_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理发票PDF上传"""
+    try:
+        # 检查是否是PDF文件
+        if not update.message.document:
+            await update.message.reply_text("⚠️ 请上传PDF文档")
+            return SALES_INVOICE_PDF
+        
+        document = update.message.document
+        file_id = document.file_id
+        file_name = document.file_name or f"invoice_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        
+        # 检查文件类型
+        if not file_name.lower().endswith('.pdf'):
+            await update.message.reply_text("⚠️ 请上传PDF格式的文件")
+            return SALES_INVOICE_PDF
+        
+        # 获取文件对象
+        file = await context.bot.get_file(file_id)
+        
+        # 下载文件内容
+        file_stream = io.BytesIO()
+        await file.download_to_memory(out=file_stream)
+        file_stream.seek(0)  # 重置指针位置
+        
+        # 上传到Google Drive
+        from google_drive_uploader import drive_uploader
+        
+        # PDF文件夹ID
+        pdf_folder_id = "1msS4CN4byTcZ5awRlfdBJmJ92hf2m2ls"
+        
+        # 生成唯一文件名
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        pdf_file_name = f"invoice_{timestamp}.pdf"
+        
+        # 创建文件元数据
+        file_metadata = {
+            'name': pdf_file_name,
+            'parents': [pdf_folder_id]
+        }
+        
+        # 执行上传
+        try:
+            # 上传文件
+            result = drive_uploader.upload_receipt(file_stream, "invoice_pdf", "application/pdf")
+            
+            if result:
+                # 保存PDF链接到用户数据
+                if isinstance(result, dict):
+                    context.user_data['sales_invoice_pdf'] = result
+                    public_link = result.get('public_link', '')
+                    await update.message.reply_text(f"✅ 发票PDF已上传: {public_link}")
+                else:
+                    context.user_data['sales_invoice_pdf'] = result
+                    await update.message.reply_text(f"✅ 发票PDF已上传: {result}")
+            else:
+                await update.message.reply_text("❌ 发票PDF上传失败")
+                context.user_data['sales_invoice_pdf'] = None
+        except Exception as e:
+            logger.error(f"上传发票PDF失败: {e}")
+            await update.message.reply_text("❌ 发票PDF上传失败，请稍后再试")
+            context.user_data['sales_invoice_pdf'] = None
+        
+        # 继续到确认页面
+        return await show_sales_confirmation(update, context)
+        
+    except Exception as e:
+        logger.error(f"处理发票PDF时出错: {e}")
+        await update.message.reply_text("❌ 处理发票PDF时出错，请重试")
+        return SALES_INVOICE_PDF
