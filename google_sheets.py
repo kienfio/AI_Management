@@ -678,42 +678,9 @@ class GoogleSheetsManager:
     def upload_receipt_to_drive(self, file_stream, file_name, mime_type='image/jpeg'):
         """上传收据到Google Drive并返回公开链接"""
         try:
-            from googleapiclient.discovery import build
-            from googleapiclient.http import MediaIoBaseUpload
-            
-            # 获取凭证
-            creds = self._get_credentials()
-            
-            # 创建Drive服务
-            drive_service = build('drive', 'v3', credentials=creds)
-            
-            folder_id = os.getenv('GOOGLE_DRIVE_FOLDER_ID')  # 从环境变量获取文件夹ID
-            file_metadata = {
-                'name': file_name,
-            }
-            if folder_id:
-                file_metadata['parents'] = [folder_id]
-            
-            media = MediaIoBaseUpload(file_stream, mimetype=mime_type, resumable=True)
-            
-            file = drive_service.files().create(
-                body=file_metadata,
-                media_body=media,
-                fields='id, webViewLink'
-            ).execute()
-            
-            # 设置文件权限为公开
-            permission = {
-                'type': 'anyone',
-                'role': 'reader'
-            }
-            drive_service.permissions().create(
-                fileId=file['id'],
-                body=permission
-            ).execute()
-            
-            logger.info(f"收据已上传至Google Drive: {file.get('webViewLink')}")
-            return file.get('webViewLink')
+            # 使用GoogleDriveUploader上传文件
+            from google_drive_uploader import drive_uploader
+            return drive_uploader.upload_receipt(file_stream, file_name, mime_type)
         except Exception as e:
             logger.error(f"上传收据到Google Drive失败: {e}")
             return None
