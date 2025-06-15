@@ -240,7 +240,7 @@ class GoogleSheetsManager:
                     else:
                         record[header] = ''
                 
-                # 获取字段值（兼容中英文表头）
+                # 获取字段值
                 date = record.get('Date', '')
                 
                 # 如果指定了月份，则过滤
@@ -258,6 +258,7 @@ class GoogleSheetsManager:
                     'commission': self._parse_number(record.get('Commission Amount', 0)),
                     'agent_name': record.get('Agent Name', ''),
                     'agent_ic': record.get('Agent IC', ''),
+                    'invoice_pdf': record.get('Invoice PDF', '')  # 添加PDF链接字段
                 }
                 
                 formatted_records.append(formatted_record)
