@@ -96,11 +96,22 @@ class SheetsManager:
             # 使用GoogleDriveUploader上传文件
             from google_drive_uploader import drive_uploader
             
+            # 添加日志，记录上传参数
+            logger.info(f"SheetsManager.upload_receipt_to_drive - 收据类型: {receipt_type}, 文件名: {file_name}")
+            
             # 如果提供了收据类型，则传递给upload_receipt方法
             if receipt_type:
-                return drive_uploader.upload_receipt(file_stream, receipt_type, mime_type)
+                # 特殊处理WiFi Bill
+                if receipt_type == "WiFi Bill":
+                    logger.info("处理WiFi Bill收据上传")
+                
+                result = drive_uploader.upload_receipt(file_stream, receipt_type, mime_type)
+                logger.info(f"上传结果: {result}")
+                return result
             else:
-                return drive_uploader.upload_receipt(file_stream, file_name, mime_type)
+                result = drive_uploader.upload_receipt(file_stream, file_name, mime_type)
+                logger.info(f"上传结果: {result}")
+                return result
         except Exception as e:
             logger.error(f"上传收据到Google Drive失败: {e}")
             return None
