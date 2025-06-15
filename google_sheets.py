@@ -675,12 +675,17 @@ class GoogleSheetsManager:
     # 收据上传
     # =============================================================================
     
-    def upload_receipt_to_drive(self, file_stream, file_name, mime_type='image/jpeg'):
+    def upload_receipt_to_drive(self, file_stream, file_name, mime_type='image/jpeg', receipt_type=None):
         """上传收据到Google Drive并返回公开链接"""
         try:
             # 使用GoogleDriveUploader上传文件
             from google_drive_uploader import drive_uploader
-            return drive_uploader.upload_receipt(file_stream, file_name, mime_type)
+            
+            # 如果提供了收据类型，则传递给upload_receipt方法
+            if receipt_type:
+                return drive_uploader.upload_receipt(file_stream, receipt_type, mime_type)
+            else:
+                return drive_uploader.upload_receipt(file_stream, file_name, mime_type)
         except Exception as e:
             logger.error(f"上传收据到Google Drive失败: {e}")
             return None
