@@ -1054,6 +1054,9 @@ async def cost_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         # 获取费用类型
         cost_type = context.user_data.get('cost_type', '')
         
+        # 添加日志，记录费用类型
+        logger.info(f"上传收据，费用类型: {cost_type}")
+        
         # 上传到Google Drive
         sheets_manager = SheetsManager()
         receipt_result = sheets_manager.upload_receipt_to_drive(
