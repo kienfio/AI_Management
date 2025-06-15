@@ -633,16 +633,19 @@ async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             elif isinstance(pdf_data, str):
                 pdf_link = pdf_data
         
+        # 只保留日期部分
+        date_str = datetime.now().strftime('%Y-%m-%d')
+        
         sales_data = {
-            'date': datetime.now().strftime('%Y-%m-%d %H:%M'),
+            'date': date_str,
             'person': context.user_data['sales_person'],
-            'amount': context.user_data['sales_amount'],
             'bill_to': bill_to,
-            'type': client_type,  # 简化为 "Agent" 或 "Company"
-            'commission_rate': context.user_data.get('commission_rate', 0),
-            'commission_amount': context.user_data['sales_commission'],
+            'amount': context.user_data['sales_amount'],
+            'type': client_type,  # "Agent" 或 "Company"
             'agent_name': agent_name,
             'agent_ic': agent_ic,
+            'comm_rate': context.user_data.get('commission_rate', 0),
+            'comm_amount': context.user_data['sales_commission'],
             'invoice_pdf': pdf_link  # 添加PDF链接
         }
         
@@ -665,7 +668,7 @@ async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if agent_name:
             success_message += f"🧑‍💼 <b>Agent:</b> {agent_name}\n"
             if agent_ic:
-                success_message += f"🪪 <b>Agent IC:</b> {agent_ic}\n"
+                success_message += f"🪪 <b>IC:</b> {agent_ic}\n"
                 
         success_message += f"💵 <b>Commission:</b> RM{commission:,.2f}\n"
         
