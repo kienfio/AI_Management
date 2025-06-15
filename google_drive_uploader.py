@@ -143,8 +143,18 @@ class GoogleDriveUploader:
                 file_name = os.path.basename(file_path_or_stream)
             else:
                 # 如果receipt_type_or_name是字符串但不是已知的收据类型，可能是文件名
-                if isinstance(receipt_type_or_name, str) and receipt_type_or_name not in self.EXPENSE_TYPE_MAPPING and receipt_type_or_name not in self.FOLDER_IDS:
-                    file_name = receipt_type_or_name
+                if isinstance(receipt_type_or_name, str):
+                    # 检查是否是已知的费用类型或映射类型
+                    is_expense_type = receipt_type_or_name in self.EXPENSE_TYPE_MAPPING or receipt_type_or_name in self.FOLDER_IDS
+                    
+                    # 如果是已知的费用类型，则生成默认文件名
+                    if is_expense_type:
+                        from datetime import datetime
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        file_name = f"receipt_{timestamp}.jpg"
+                    else:
+                        # 否则，使用提供的字符串作为文件名
+                        file_name = receipt_type_or_name
                 else:
                     # 生成默认文件名
                     from datetime import datetime
@@ -154,7 +164,16 @@ class GoogleDriveUploader:
             # 获取目标文件夹ID
             folder_id = None
             if isinstance(receipt_type_or_name, str):
-                folder_id = self._get_folder_id(receipt_type_or_name)
+                # 处理特殊情况：将"Water Bill"映射到"water"，"Electricity Bill"映射到"electricity"
+                if receipt_type_or_name == "Water Bill":
+                    folder_id = self._get_folder_id("water")
+                elif receipt_type_or_name == "Electricity Bill":
+                    folder_id = self._get_folder_id("electricity")
+                else:
+                    folder_id = self._get_folder_id(receipt_type_or_name)
+                
+                # 日志记录
+                logger.info(f"收据类型: {receipt_type_or_name}, 文件夹ID: {folder_id}")
             
             # 创建文件元数据
             file_metadata = {
