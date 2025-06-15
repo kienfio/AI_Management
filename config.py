@@ -94,7 +94,10 @@ class SheetsManager:
         """上传收据到Google Drive并返回公开链接"""
         try:
             # 使用GoogleDriveUploader上传文件
-            from google_drive_uploader import drive_uploader
+            from google_drive_uploader import get_drive_uploader
+            
+            # 获取正确初始化的drive_uploader实例
+            drive_uploader = get_drive_uploader()
             
             # 添加日志，记录上传参数
             logger.info(f"SheetsManager.upload_receipt_to_drive - 收据类型: {receipt_type}, 文件名: {file_name}")
