@@ -2,6 +2,8 @@ from __future__ import print_function
 import os
 import io
 import logging
+import base64
+import json
 from typing import Dict, Optional, Union, BinaryIO
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload
@@ -20,9 +22,9 @@ class GoogleDriveUploader:
     
     # 文件夹ID映射
     FOLDER_IDS = {
-        "electricity": "1FXf65K3fY-G4CS49oFr_lxeTltPDrEhh",  # 电费收据文件夹
-        "water": "1L2viDKNPbuIX01mnLn5VM2VA_1iIavOh",       # 水费收据文件夹
-        "Purchasing": "1kXKGC9bHMeMmFtPPogrvW0xdbVjOjYF8"   # 购买杂货收据文件夹
+        "electricity": os.getenv('DRIVE_FOLDER_ELECTRICITY', "1FXf65K3fY-G4CS49oFr_lxeTltPDrEhh"),  # 电费收据文件夹
+        "water": os.getenv('DRIVE_FOLDER_WATER', "1L2viDKNPbuIX01mnLn5VM2VA_1iIavOh"),             # 水费收据文件夹
+        "Purchasing": os.getenv('DRIVE_FOLDER_PURCHASING', "1kXKGC9bHMeMmFtPPogrvW0xdbVjOjYF8")    # 购买杂货收据文件夹
     }
     
     # 费用类型映射到文件夹类型
@@ -49,9 +51,48 @@ class GoogleDriveUploader:
             # 定义需要的权限范围
             SCOPES = ['https://www.googleapis.com/auth/drive']
             
-            # 加载服务账号凭证
-            credentials = service_account.Credentials.from_service_account_file(
-                self.credentials_file, scopes=SCOPES)
+            # 尝试不同方式获取凭证
+            credentials = None
+            
+            # 1. 尝试从环境变量获取Base64编码的凭证
+            creds_base64 = os.getenv('GOOGLE_CREDENTIALS_BASE64')
+            if creds_base64:
+                try:
+                    creds_json = base64.b64decode(creds_base64).decode('utf-8')
+                    creds_info = json.loads(creds_json)
+                    credentials = service_account.Credentials.from_service_account_info(
+                        creds_info, scopes=SCOPES)
+                    logger.info("从环境变量GOOGLE_CREDENTIALS_BASE64加载凭证成功")
+                except Exception as e:
+                    logger.warning(f"从环境变量GOOGLE_CREDENTIALS_BASE64加载凭证失败: {e}")
+            
+            # 2. 尝试从环境变量获取JSON内容
+            if not credentials:
+                creds_content = os.getenv('GOOGLE_CREDENTIALS_CONTENT')
+                if creds_content:
+                    try:
+                        creds_info = json.loads(creds_content)
+                        credentials = service_account.Credentials.from_service_account_info(
+                            creds_info, scopes=SCOPES)
+                        logger.info("从环境变量GOOGLE_CREDENTIALS_CONTENT加载凭证成功")
+                    except Exception as e:
+                        logger.warning(f"从环境变量GOOGLE_CREDENTIALS_CONTENT加载凭证失败: {e}")
+            
+            # 3. 尝试从文件加载凭证
+            if not credentials:
+                # 检查环境变量中的文件路径
+                file_path = os.getenv('GOOGLE_CREDENTIALS_FILE', self.credentials_file)
+                if os.path.exists(file_path):
+                    try:
+                        credentials = service_account.Credentials.from_service_account_file(
+                            file_path, scopes=SCOPES)
+                        logger.info(f"从文件 {file_path} 加载凭证成功")
+                    except Exception as e:
+                        logger.warning(f"从文件 {file_path} 加载凭证失败: {e}")
+            
+            # 如果所有方法都失败，抛出异常
+            if not credentials:
+                raise ValueError("无法获取Google API凭证，请检查环境变量或凭证文件")
             
             # 构建Drive服务
             self.drive_service = build('drive', 'v3', credentials=credentials)
