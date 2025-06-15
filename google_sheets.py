@@ -22,7 +22,7 @@ SHEET_NAMES = {
     'pic': 'Person in Charge'
 }
 
-SALES_HEADERS = ['Date', 'Personal in Charge', 'Amount', 'Bill To', 'Type', 'Commission Rate', 'Commission Amount', 'Agent Name', 'Agent IC']
+SALES_HEADERS = ['Date', 'PIC', 'Invoice NO', 'Bill To', 'Amount', 'Status', 'Type', 'Agent Name', 'IC', 'Comm Rate', 'Comm Amount', 'Invoice PDF']
 EXPENSES_HEADERS = ['Date', 'Expense Type', 'Supplier', 'Amount', 'Category', 'Notes', 'Receipt']
 AGENTS_HEADERS = ['Name', 'IC', 'Phone']
 SUPPLIERS_HEADERS = ['Name', 'Contact', 'Phone', 'Email', 'Products/Services', 'Status']
@@ -189,16 +189,24 @@ class GoogleSheetsManager:
             commission_rate = data.get('commission_rate', 0)
             commission_rate_display = f"{commission_rate * 100}%" if commission_rate else "0%"
             
+            # 处理日期格式，只保留日期部分
+            date_str = data.get('date', datetime.now().strftime('%Y-%m-%d'))
+            if ' ' in date_str:  # 如果包含时间，只取日期部分
+                date_str = date_str.split(' ')[0]
+            
             row_data = [
-                data.get('date', datetime.now().strftime('%Y-%m-%d')),
-                data.get('person', ''),
-                data.get('amount', 0),
-                data.get('bill_to', ''),
-                data.get('type', ''),
-                commission_rate_display,  # 显示为百分比
-                data.get('commission_amount', 0),
-                data.get('agent_name', ''),  # 代理商名称
-                data.get('agent_ic', ''),    # 代理商IC
+                date_str,                        # Date - 只显示日期
+                data.get('person', ''),          # PIC
+                '',                              # Invoice NO - 留空
+                data.get('bill_to', ''),         # Bill To
+                data.get('amount', 0),           # Amount
+                '',                              # Status - 留空
+                data.get('type', ''),            # Type
+                data.get('agent_name', ''),      # Agent Name
+                data.get('agent_ic', ''),        # IC
+                commission_rate_display,         # Comm Rate
+                data.get('commission_amount', 0), # Comm Amount
+                data.get('invoice_pdf', '')      # Invoice PDF
             ]
             
             worksheet.append_row(row_data)
@@ -250,15 +258,17 @@ class GoogleSheetsManager:
                 # 构建标准化的记录
                 formatted_record = {
                     'date': date,
-                    'person': record.get('Personal in Charge', ''),
-                    'amount': self._parse_number(record.get('Amount', 0)),
+                    'person': record.get('PIC', ''),
+                    'invoice_no': record.get('Invoice NO', ''),
                     'bill_to': record.get('Bill To', ''),
+                    'amount': self._parse_number(record.get('Amount', 0)),
+                    'status': record.get('Status', ''),
                     'type': record.get('Type', ''),
-                    'commission_rate': self._parse_number(record.get('Commission Rate', 0)),
-                    'commission': self._parse_number(record.get('Commission Amount', 0)),
                     'agent_name': record.get('Agent Name', ''),
-                    'agent_ic': record.get('Agent IC', ''),
-                    'invoice_pdf': record.get('Invoice PDF', '')  # 添加PDF链接字段
+                    'agent_ic': record.get('IC', ''),
+                    'commission_rate': self._parse_number(record.get('Comm Rate', '').replace('%', '')) / 100 if record.get('Comm Rate', '') else 0,
+                    'commission': self._parse_number(record.get('Comm Amount', 0)),
+                    'invoice_pdf': record.get('Invoice PDF', '')
                 }
                 
                 formatted_records.append(formatted_record)
