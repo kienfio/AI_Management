@@ -153,17 +153,21 @@ async def sales_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await close_other_conversations(update, context)
     
     keyboard = [
+        [InlineKeyboardButton("📊 Add Sale Invoice", callback_data="sales_add")],
+        [InlineKeyboardButton("📋 View Sales Records", callback_data="sales_list")],
         [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="back_main")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    message = ""
+    message = "📊 <b>SALES MANAGEMENT</b>\n\nPlease select an option:"
     
     await update.callback_query.edit_message_text(
         message, 
-        parse_mode=ParseMode.MARKDOWN,
+        parse_mode=ParseMode.HTML,
         reply_markup=reply_markup
     )
+    
+    return ConversationHandler.END
 
 async def sales_add_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """开始添加销售记录 - 输入负责人 (已弃用)"""
@@ -1577,7 +1581,17 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     
     # 销售记录回调
     elif query.data == "back_sales":
-        return await sales_menu(update, context)
+        try:
+            # 清除PDF相关的用户数据
+            if 'sales_invoice_pdf' in context.user_data:
+                del context.user_data['sales_invoice_pdf']
+            
+            logger.info("处理back_sales回调")
+            return await sales_menu(update, context)
+        except Exception as e:
+            logger.error(f"处理back_sales回调失败: {e}")
+            # 如果sales_menu失败，返回主菜单
+            return await callback_query_handler(update, context)
     elif query.data == "sales_list":
         await sales_list_handler(update, context)
         return ConversationHandler.END
@@ -2533,21 +2547,36 @@ async def upload_invoice_pdf_prompt(update: Update, context: ContextTypes.DEFAUL
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(
-        "📄 <b>Upload Invoice PDF</b>\n\n"
-        "Please upload a PDF file of the invoice.\n"
-        "Or click 'Skip' to continue without uploading.",
-        parse_mode=ParseMode.HTML,
-        reply_markup=reply_markup
-    )
+    # 使用reply_text而不是edit_message_text，避免可能的空消息错误
+    try:
+        await query.edit_message_text(
+            "📄 <b>Upload Invoice PDF</b>\n\n"
+            "Please upload a PDF file of the invoice.\n"
+            "Or click 'Skip' to continue without uploading.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+    except Exception as e:
+        logger.error(f"编辑消息失败: {e}")
+        # 如果编辑失败，尝试发送新消息
+        await query.message.reply_html(
+            "📄 <b>Upload Invoice PDF</b>\n\n"
+            "Please upload a PDF file of the invoice.\n"
+            "Or click 'Skip' to continue without uploading.",
+            reply_markup=reply_markup
+        )
     
+    logger.info("已显示PDF上传提示")
     return SALES_INVOICE_PDF
 
 async def sales_invoice_pdf_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """处理发票PDF上传"""
     try:
+        logger.info("开始处理PDF上传...")
+        
         # 检查是否是PDF文件
         if not update.message.document:
+            logger.warning("未接收到文档文件")
             await update.message.reply_text("⚠️ 请上传PDF文档")
             return SALES_INVOICE_PDF
         
@@ -2555,50 +2584,67 @@ async def sales_invoice_pdf_handler(update: Update, context: ContextTypes.DEFAUL
         file_id = document.file_id
         file_name = document.file_name or f"invoice_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
         
+        logger.info(f"接收到文件: {file_name}, ID: {file_id}, MIME类型: {document.mime_type}")
+        
         # 检查文件类型
-        if not file_name.lower().endswith('.pdf'):
+        if not file_name.lower().endswith('.pdf') and document.mime_type != 'application/pdf':
+            logger.warning(f"文件类型不是PDF: {file_name}, MIME类型: {document.mime_type}")
             await update.message.reply_text("⚠️ 请上传PDF格式的文件")
             return SALES_INVOICE_PDF
         
         # 获取文件对象
-        file = await context.bot.get_file(file_id)
+        try:
+            file = await context.bot.get_file(file_id)
+            logger.info(f"获取文件成功: {file.file_path}")
+        except Exception as e:
+            logger.error(f"获取文件失败: {e}")
+            await update.message.reply_text("❌ 获取文件失败，请重试")
+            return SALES_INVOICE_PDF
         
         # 下载文件内容
-        file_stream = io.BytesIO()
-        await file.download_to_memory(out=file_stream)
-        file_stream.seek(0)  # 重置指针位置
+        try:
+            file_stream = io.BytesIO()
+            await file.download_to_memory(out=file_stream)
+            file_stream.seek(0)  # 重置指针位置
+            logger.info("文件内容下载成功")
+        except Exception as e:
+            logger.error(f"下载文件内容失败: {e}")
+            await update.message.reply_text("❌ 下载文件内容失败，请重试")
+            return SALES_INVOICE_PDF
         
         # 上传到Google Drive
-        from google_drive_uploader import drive_uploader
-        
-        # PDF文件夹ID
-        pdf_folder_id = "1msS4CN4byTcZ5awRlfdBJmJ92hf2m2ls"
-        
-        # 生成唯一文件名
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        pdf_file_name = f"invoice_{timestamp}.pdf"
-        
-        # 创建文件元数据
-        file_metadata = {
-            'name': pdf_file_name,
-            'parents': [pdf_folder_id]
-        }
-        
-        # 执行上传
         try:
-            # 上传文件
-            result = drive_uploader.upload_receipt(file_stream, "invoice_pdf", "application/pdf")
+            from google_drive_uploader import drive_uploader
+            
+            # 确保drive_uploader已初始化
+            if not hasattr(drive_uploader, 'drive_service') or drive_uploader.drive_service is None:
+                logger.error("Google Drive上传器未初始化")
+                await update.message.reply_text("❌ Google Drive服务未初始化，请稍后再试")
+                return SALES_INVOICE_PDF
+                
+            logger.info("开始上传PDF到Google Drive...")
+            
+            # 确保使用正确的MIME类型
+            mime_type = document.mime_type if document.mime_type else 'application/pdf'
+            logger.info(f"使用MIME类型: {mime_type}")
+            
+            # 执行上传
+            result = drive_uploader.upload_receipt(file_stream, "invoice_pdf", mime_type)
+            logger.info(f"上传结果: {result}")
             
             if result:
                 # 保存PDF链接到用户数据
                 if isinstance(result, dict):
                     context.user_data['sales_invoice_pdf'] = result
                     public_link = result.get('public_link', '')
-                    await update.message.reply_text(f"✅ 发票PDF已上传: {public_link}")
+                    logger.info(f"PDF上传成功，链接: {public_link}")
+                    await update.message.reply_text(f"✅ 发票PDF已上传成功")
                 else:
                     context.user_data['sales_invoice_pdf'] = result
-                    await update.message.reply_text(f"✅ 发票PDF已上传: {result}")
+                    logger.info(f"PDF上传成功，链接: {result}")
+                    await update.message.reply_text(f"✅ 发票PDF已上传成功")
             else:
+                logger.error("上传结果为空")
                 await update.message.reply_text("❌ 发票PDF上传失败")
                 context.user_data['sales_invoice_pdf'] = None
         except Exception as e:
@@ -2607,6 +2653,7 @@ async def sales_invoice_pdf_handler(update: Update, context: ContextTypes.DEFAUL
             context.user_data['sales_invoice_pdf'] = None
         
         # 继续到确认页面
+        logger.info("继续到确认页面...")
         return await show_sales_confirmation(update, context)
         
     except Exception as e:
