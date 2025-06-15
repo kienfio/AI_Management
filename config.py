@@ -121,24 +121,33 @@ class SheetsManager:
         try:
             # 获取当前日期作为默认日期
             date_str = data.get('date', datetime.now().strftime('%Y-%m-%d'))
+            # 如果包含时间，只取日期部分
+            if ' ' in date_str:
+                date_str = date_str.split(' ')[0]
+                
+            # 准备佣金率显示
+            comm_rate = float(data.get('comm_rate', 0))
+            comm_rate_display = f"{comm_rate * 100}%" if comm_rate else "0%"
             
             # 准备数据行
             row = [
                 date_str,                     # Date
-                data.get('person', ''),       # Person
+                data.get('person', ''),       # PIC
+                '',                           # Invoice NO - 留空
                 data.get('bill_to', ''),      # Bill To
-                data.get('client', ''),       # Client
                 float(data.get('amount', 0)), # Amount
-                data.get('agent', ''),        # Agent
-                data.get('comm_type', ''),    # Commission Type
-                float(data.get('comm_rate', 0)), # Commission Rate
-                float(data.get('comm_amount', 0)), # Commission Amount
+                '',                           # Status - 留空
+                data.get('type', ''),         # Type
+                data.get('agent_name', ''),   # Agent Name
+                data.get('agent_ic', ''),     # IC
+                comm_rate_display,            # Comm Rate
+                float(data.get('comm_amount', 0)), # Comm Amount
                 data.get('invoice_pdf', '')   # Invoice PDF Link
             ]
             
             # 添加到 Sales Records 表格
             sheet_id = os.getenv('SALES_SHEET_ID')
-            range_name = 'Sales Records!A:J'  # 更新为A:J以包含PDF链接列
+            range_name = 'Sales Records!A:L'  # 更新为A:L以包含所有列
             
             result = self.sheets_service.spreadsheets().values().append(
                 spreadsheetId=sheet_id,
