@@ -2647,6 +2647,10 @@ async def sales_invoice_pdf_handler(update: Update, context: ContextTypes.DEFAUL
             mime_type = document.mime_type if document.mime_type else 'application/pdf'
             logger.info(f"使用MIME类型: {mime_type}")
             
+            # 确保文件流指针在开头
+            file_stream.seek(0)
+            logger.info("已重置文件流指针位置")
+            
             # 执行上传
             result = drive_uploader.upload_receipt(file_stream, "invoice_pdf", mime_type)
             logger.info(f"上传结果: {result}")
@@ -2667,7 +2671,7 @@ async def sales_invoice_pdf_handler(update: Update, context: ContextTypes.DEFAUL
                 await update.message.reply_text("❌ 发票PDF上传失败")
                 context.user_data['sales_invoice_pdf'] = None
         except Exception as e:
-            logger.error(f"上传发票PDF失败: {e}")
+            logger.error(f"上传发票PDF失败: {e}", exc_info=True)  # 记录完整堆栈信息
             await update.message.reply_text("❌ 发票PDF上传失败，请稍后再试")
             context.user_data['sales_invoice_pdf'] = None
         
@@ -2676,6 +2680,6 @@ async def sales_invoice_pdf_handler(update: Update, context: ContextTypes.DEFAUL
         return await show_sales_confirmation(update, context)
         
     except Exception as e:
-        logger.error(f"处理发票PDF时出错: {e}")
+        logger.error(f"处理发票PDF时出错: {e}", exc_info=True)  # 记录完整堆栈信息
         await update.message.reply_text("❌ 处理发票PDF时出错，请重试")
         return SALES_INVOICE_PDF
