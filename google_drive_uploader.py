@@ -24,14 +24,16 @@ class GoogleDriveUploader:
     FOLDER_IDS = {
         "electricity": os.getenv('DRIVE_FOLDER_ELECTRICITY', "1FXf65K3fY-G4CS49oFr_lxeTltPDrEhh"),  # 电费收据文件夹
         "water": os.getenv('DRIVE_FOLDER_WATER', "1L2viDKNPbuIX01mnLn5VM2VA_1iIavOh"),             # 水费收据文件夹
-        "Purchasing": os.getenv('DRIVE_FOLDER_PURCHASING', "1kXKGC9bHMeMmFtPPogrvW0xdbVjOjYF8")    # 购买杂货收据文件夹
+        "Purchasing": os.getenv('DRIVE_FOLDER_PURCHASING', "1kXKGC9bHMeMmFtPPogrvW0xdbVjOjYF8"),    # 购买杂货收据文件夹
+        "wifi": os.getenv('DRIVE_FOLDER_WIFI', "1KjWV4tWHLh1aSM2QcTtfDXXSTbzD1UF4")                # WiFi收据文件夹
     }
     
     # 费用类型映射到文件夹类型
     EXPENSE_TYPE_MAPPING = {
         "Electricity Bill": "electricity",
         "Water Bill": "water",
-        "Purchasing": "Purchasing"
+        "Purchasing": "Purchasing",
+        "WiFi Bill": "wifi"
     }
     
     def __init__(self, credentials_file='credentials.json'):
@@ -111,14 +113,23 @@ class GoogleDriveUploader:
         Returns:
             文件夹ID或None
         """
+        # 添加日志，帮助调试
+        logger.info(f"获取文件夹ID，费用类型: {expense_type}")
+        
         # 首先尝试从映射中获取
         folder_type = self.EXPENSE_TYPE_MAPPING.get(expense_type, expense_type)
         folder_id = self.FOLDER_IDS.get(folder_type)
+        
+        # 特殊处理 WiFi Bill
+        if expense_type == "WiFi Bill" and not folder_id:
+            folder_id = self.FOLDER_IDS.get("wifi")
+            logger.info(f"特殊处理 WiFi Bill，获取wifi文件夹ID: {folder_id}")
         
         # 如果没有找到，尝试从环境变量获取默认文件夹ID
         if not folder_id:
             folder_id = os.getenv('GOOGLE_DRIVE_FOLDER_ID')
             
+        logger.info(f"最终使用的文件夹ID: {folder_id}")
         return folder_id
     
     def upload_receipt(self, file_path_or_stream, receipt_type_or_name, mime_type='image/jpeg'):
@@ -135,6 +146,9 @@ class GoogleDriveUploader:
             dict: 包含文件ID和公开链接的字典，或者直接返回公开链接字符串(兼容旧代码)
         """
         try:
+            # 添加日志，记录上传参数
+            logger.info(f"上传收据，类型: {receipt_type_or_name}, MIME类型: {mime_type}")
+            
             # 确定是文件路径还是文件流
             is_file_path = isinstance(file_path_or_stream, str)
             
@@ -161,14 +175,24 @@ class GoogleDriveUploader:
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     file_name = f"receipt_{timestamp}.jpg"
             
+            logger.info(f"使用文件名: {file_name}")
+            
             # 获取目标文件夹ID
             folder_id = None
             if isinstance(receipt_type_or_name, str):
                 # 处理特殊情况：将"Water Bill"映射到"water"，"Electricity Bill"映射到"electricity"
                 if receipt_type_or_name == "Water Bill":
                     folder_id = self._get_folder_id("water")
+                    logger.info(f"Water Bill特殊处理，文件夹ID: {folder_id}")
                 elif receipt_type_or_name == "Electricity Bill":
                     folder_id = self._get_folder_id("electricity")
+                    logger.info(f"Electricity Bill特殊处理，文件夹ID: {folder_id}")
+                elif receipt_type_or_name == "WiFi Bill":
+                    folder_id = self.FOLDER_IDS.get("wifi")
+                    logger.info(f"WiFi Bill特殊处理，直接获取wifi文件夹ID: {folder_id}")
+                    if not folder_id:
+                        folder_id = "1KjWV4tWHLh1aSM2QcTtfDXXSTbzD1UF4"  # 使用硬编码的ID作为备份
+                        logger.info(f"使用硬编码的WiFi文件夹ID: {folder_id}")
                 else:
                     folder_id = self._get_folder_id(receipt_type_or_name)
                 
@@ -181,6 +205,9 @@ class GoogleDriveUploader:
             }
             if folder_id:
                 file_metadata['parents'] = [folder_id]
+                logger.info(f"设置父文件夹ID: {folder_id}")
+            else:
+                logger.warning("未找到有效的文件夹ID，文件将上传到根目录")
             
             # 创建媒体对象
             if is_file_path:
@@ -196,6 +223,7 @@ class GoogleDriveUploader:
                 media = MediaIoBaseUpload(file_path_or_stream, mimetype=mime_type, resumable=True)
             
             # 执行上传
+            logger.info("开始上传文件...")
             file = self.drive_service.files().create(
                 body=file_metadata,
                 media_body=media,
