@@ -1051,12 +1051,16 @@ async def cost_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         file_name = f"receipt_{timestamp}.jpg" if file_type == 'photo' else file.file_name
         
+        # 获取费用类型
+        cost_type = context.user_data.get('cost_type', '')
+        
         # 上传到Google Drive
         sheets_manager = SheetsManager()
         receipt_link = sheets_manager.upload_receipt_to_drive(
             file_stream, 
             file_name,
-            file.mime_type if hasattr(file, 'mime_type') else 'image/jpeg'
+            file.mime_type if hasattr(file, 'mime_type') else 'image/jpeg',
+            cost_type  # 传递费用类型作为额外参数
         )
         
         if receipt_link:
