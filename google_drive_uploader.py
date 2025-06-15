@@ -158,6 +158,9 @@ class GoogleDriveUploader:
             dict: 包含文件ID和公开链接的字典，或者直接返回公开链接字符串(兼容旧代码)
         """
         try:
+            # 导入json模块用于错误处理
+            import json
+            
             # 添加日志，记录上传参数
             logger.info(f"上传收据，类型: {receipt_type_or_name}, MIME类型: {mime_type}")
             
@@ -240,8 +243,15 @@ class GoogleDriveUploader:
                     mime_type = self._get_mime_type(file_path_or_stream)
                 
                 media = MediaFileUpload(file_path_or_stream, mimetype=mime_type, resumable=True)
+                logger.info(f"创建文件上传对象: 文件路径: {file_path_or_stream}, MIME类型: {mime_type}")
             else:
-                media = MediaIoBaseUpload(file_path_or_stream, mimetype=mime_type, resumable=True)
+                # 如果是文件流，确保指针在开头
+                file_stream = file_path_or_stream
+                if hasattr(file_stream, 'seek'):
+                    file_stream.seek(0)
+                
+                media = MediaIoBaseUpload(file_stream, mimetype=mime_type, resumable=True)
+                logger.info(f"创建媒体流上传对象: 文件名: {file_name}, MIME类型: {mime_type}")
             
             # 执行上传
             logger.info("开始上传文件...")
@@ -252,8 +262,10 @@ class GoogleDriveUploader:
             ).execute()
             
             file_id = file.get('id')
+            logger.info(f"文件上传成功，文件ID: {file_id}")
             
             # 设置文件权限为"任何人都可以查看"
+            logger.info("设置文件权限为公开...")
             self.drive_service.permissions().create(
                 fileId=file_id,
                 body={'type': 'anyone', 'role': 'reader'},
@@ -261,9 +273,7 @@ class GoogleDriveUploader:
             ).execute()
             
             public_link = file.get('webViewLink', '')
-            
-            logger.info(f"文件 '{file_name}' 上传成功，文件ID: {file_id}")
-            logger.info(f"公开链接: {public_link}")
+            logger.info(f"生成公开链接: {public_link}")
             
             # 为了兼容旧代码，如果调用方式是旧的，则直接返回链接
             if not is_file_path and not isinstance(receipt_type_or_name, str):
@@ -276,7 +286,17 @@ class GoogleDriveUploader:
             }
             
         except Exception as e:
-            logger.error(f"上传文件失败: {e}")
+            logger.error(f"上传文件失败: {e}", exc_info=True)  # 记录完整异常信息
+            logger.error(f"上传参数: 类型={receipt_type_or_name}, MIME={mime_type}, 文件名={file_name if 'file_name' in locals() else '未知'}")
+            
+            # 如果是HTTP错误，记录响应内容
+            if hasattr(e, 'content'):
+                try:
+                    error_details = json.loads(e.content)
+                    logger.error(f"Google API错误详情: {error_details}")
+                except:
+                    logger.error(f"原始错误响应: {e.content}")
+            
             if not is_file_path and not isinstance(receipt_type_or_name, str):
                 return None  # 兼容旧代码
             raise
