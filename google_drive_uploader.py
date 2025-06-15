@@ -166,7 +166,10 @@ class GoogleDriveUploader:
                     if is_expense_type:
                         from datetime import datetime
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        file_name = f"receipt_{timestamp}.jpg"
+                        if receipt_type_or_name == "invoice_pdf":
+                            file_name = f"invoice_{timestamp}.pdf"
+                        else:
+                            file_name = f"receipt_{timestamp}.jpg"
                     else:
                         # 否则，使用提供的字符串作为文件名
                         file_name = receipt_type_or_name
@@ -181,7 +184,7 @@ class GoogleDriveUploader:
             # 获取目标文件夹ID
             folder_id = None
             if isinstance(receipt_type_or_name, str):
-                # 处理特殊情况：将"Water Bill"映射到"water"，"Electricity Bill"映射到"electricity"
+                # 处理特殊情况
                 if receipt_type_or_name == "Water Bill":
                     folder_id = self._get_folder_id("water")
                     logger.info(f"Water Bill特殊处理，文件夹ID: {folder_id}")
@@ -194,6 +197,12 @@ class GoogleDriveUploader:
                     if not folder_id:
                         folder_id = "1KjWV4tWHLh1aSM2QcTtfDXXSTbzD1UF4"  # 使用硬编码的ID作为备份
                         logger.info(f"使用硬编码的WiFi文件夹ID: {folder_id}")
+                elif receipt_type_or_name == "invoice_pdf":
+                    folder_id = self.FOLDER_IDS.get("invoice_pdf")
+                    logger.info(f"Invoice PDF特殊处理，直接获取invoice_pdf文件夹ID: {folder_id}")
+                    if not folder_id:
+                        folder_id = "1msS4CN4byTcZ5awRlfdBJmJ92hf2m2ls"  # 使用硬编码的ID作为备份
+                        logger.info(f"使用硬编码的Invoice PDF文件夹ID: {folder_id}")
                 else:
                     folder_id = self._get_folder_id(receipt_type_or_name)
                 
