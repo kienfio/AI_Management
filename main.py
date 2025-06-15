@@ -13,12 +13,26 @@ import json
 import sys
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 
+# 设置环境变量
+if not os.getenv('DRIVE_FOLDER_INVOICE_PDF'):
+    os.environ['DRIVE_FOLDER_INVOICE_PDF'] = '1msS4CN4byTcZ5awRlfdBJmJ92hf2m2ls'
+    print("已设置DRIVE_FOLDER_INVOICE_PDF环境变量")
+
+# 尝试加载.env文件
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+    print("已加载.env文件")
+except ImportError:
+    print("dotenv模块未安装，跳过加载.env文件")
+
 def test_credentials():
     """测试Google API凭证"""
     print("===== 环境变量检查 =====")
     print(f"GOOGLE_CREDENTIALS_BASE64: {'✅ 已设置' if os.getenv('GOOGLE_CREDENTIALS_BASE64') else '❌ 未设置'}")
     print(f"GOOGLE_SHEET_ID: {'✅ 已设置' if os.getenv('GOOGLE_SHEET_ID') else '❌ 未设置'}")
     print(f"TELEGRAM_TOKEN: {'✅ 已设置' if os.getenv('TELEGRAM_TOKEN') else '❌ 未设置'}")
+    print(f"DRIVE_FOLDER_INVOICE_PDF: {'✅ 已设置' if os.getenv('DRIVE_FOLDER_INVOICE_PDF') else '❌ 未设置'}")
     
     # 测试Base64凭证
     google_creds_base64 = os.getenv('GOOGLE_CREDENTIALS_BASE64')
