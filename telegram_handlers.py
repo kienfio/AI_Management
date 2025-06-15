@@ -1096,27 +1096,42 @@ async def cost_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         # 添加日志，记录费用类型
         logger.info(f"上传收据，费用类型: {cost_type}")
         
-        # 上传到Google Drive
-        sheets_manager = SheetsManager()
-        receipt_result = sheets_manager.upload_receipt_to_drive(
-            file_stream, 
-            file_name,
-            file.mime_type if hasattr(file, 'mime_type') else 'image/jpeg',
-            cost_type  # 传递费用类型作为额外参数
-        )
-        
-        if receipt_result:
-            # 处理返回结果可能是字典或字符串的情况
-            if isinstance(receipt_result, dict):
-                public_link = receipt_result.get('public_link', '')
-                context.user_data['cost_receipt'] = receipt_result
-                await update.message.reply_text(f"✅ 收据已上传: {public_link}")
+        # 直接使用GoogleDriveUploader上传文件
+        try:
+            from google_drive_uploader import get_drive_uploader
+            
+            # 获取正确初始化的drive_uploader实例
+            drive_uploader = get_drive_uploader()
+            
+            # 上传文件
+            mime_type = file.mime_type if hasattr(file, 'mime_type') else 'image/jpeg'
+            logger.info(f"使用MIME类型: {mime_type}, 费用类型: {cost_type}")
+            
+            receipt_result = drive_uploader.upload_receipt(
+                file_stream, 
+                cost_type,  # 传递费用类型
+                mime_type
+            )
+            
+            if receipt_result:
+                # 处理返回结果可能是字典或字符串的情况
+                if isinstance(receipt_result, dict):
+                    public_link = receipt_result.get('public_link', '')
+                    context.user_data['cost_receipt'] = receipt_result
+                    await update.message.reply_text(f"✅ 收据已上传成功")
+                    logger.info(f"收据上传成功，链接: {public_link}")
+                else:
+                    # 如果是字符串，直接使用
+                    context.user_data['cost_receipt'] = receipt_result
+                    await update.message.reply_text(f"✅ 收据已上传成功")
+                    logger.info(f"收据上传成功，链接: {receipt_result}")
             else:
-                # 如果是字符串，直接使用
-                context.user_data['cost_receipt'] = receipt_result
-                await update.message.reply_text(f"✅ 收据已上传: {receipt_result}")
-        else:
-            await update.message.reply_text("❌ 收据上传失败")
+                logger.error("上传结果为空")
+                await update.message.reply_text("❌ 收据上传失败")
+                context.user_data['cost_receipt'] = None
+        except Exception as e:
+            logger.error(f"上传收据失败: {e}")
+            await update.message.reply_text("❌ 收据上传失败，请稍后再试")
             context.user_data['cost_receipt'] = None
         
         # 继续到确认页面
@@ -2614,7 +2629,10 @@ async def sales_invoice_pdf_handler(update: Update, context: ContextTypes.DEFAUL
         
         # 上传到Google Drive
         try:
-            from google_drive_uploader import drive_uploader
+            from google_drive_uploader import get_drive_uploader
+            
+            # 获取正确初始化的drive_uploader实例
+            drive_uploader = get_drive_uploader()
             
             # 确保drive_uploader已初始化
             if not hasattr(drive_uploader, 'drive_service') or drive_uploader.drive_service is None:
@@ -2623,6 +2641,7 @@ async def sales_invoice_pdf_handler(update: Update, context: ContextTypes.DEFAUL
                 return SALES_INVOICE_PDF
                 
             logger.info("开始上传PDF到Google Drive...")
+            logger.info(f"PDF文件夹ID: {drive_uploader.FOLDER_IDS.get('invoice_pdf')}")
             
             # 确保使用正确的MIME类型
             mime_type = document.mime_type if document.mime_type else 'application/pdf'
