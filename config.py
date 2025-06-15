@@ -132,12 +132,13 @@ class SheetsManager:
                 data.get('agent', ''),        # Agent
                 data.get('comm_type', ''),    # Commission Type
                 float(data.get('comm_rate', 0)), # Commission Rate
-                float(data.get('comm_amount', 0)) # Commission Amount
+                float(data.get('comm_amount', 0)), # Commission Amount
+                data.get('invoice_pdf', '')   # Invoice PDF Link
             ]
             
             # 添加到 Sales Records 表格
             sheet_id = os.getenv('SALES_SHEET_ID')
-            range_name = 'Sales Records!A:I'
+            range_name = 'Sales Records!A:J'  # 更新为A:J以包含PDF链接列
             
             result = self.sheets_service.spreadsheets().values().append(
                 spreadsheetId=sheet_id,
