@@ -1056,16 +1056,23 @@ async def cost_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         
         # 上传到Google Drive
         sheets_manager = SheetsManager()
-        receipt_link = sheets_manager.upload_receipt_to_drive(
+        receipt_result = sheets_manager.upload_receipt_to_drive(
             file_stream, 
             file_name,
             file.mime_type if hasattr(file, 'mime_type') else 'image/jpeg',
             cost_type  # 传递费用类型作为额外参数
         )
         
-        if receipt_link:
-            context.user_data['cost_receipt'] = receipt_link
-            await update.message.reply_text(f"✅ 收据已上传: {receipt_link}")
+        if receipt_result:
+            # 处理返回结果可能是字典或字符串的情况
+            if isinstance(receipt_result, dict):
+                public_link = receipt_result.get('public_link', '')
+                context.user_data['cost_receipt'] = receipt_result
+                await update.message.reply_text(f"✅ 收据已上传: {public_link}")
+            else:
+                # 如果是字符串，直接使用
+                context.user_data['cost_receipt'] = receipt_result
+                await update.message.reply_text(f"✅ 收据已上传: {receipt_result}")
         else:
             await update.message.reply_text("❌ 收据上传失败")
             context.user_data['cost_receipt'] = None
@@ -1090,6 +1097,10 @@ async def cost_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         supplier = context.user_data.get('cost_supplier', '')
         desc = context.user_data.get('cost_desc', '')
         receipt_link = context.user_data.get('cost_receipt', '')
+        
+        # 处理收据链接可能是字典的情况
+        if isinstance(receipt_link, dict) and 'public_link' in receipt_link:
+            receipt_link = receipt_link['public_link']
         
         # 记录到Google Sheets
         date_str = datetime.now().strftime('%Y-%m-%d')
@@ -1148,7 +1159,9 @@ async def show_cost_confirmation(update: Update, context: ContextTypes.DEFAULT_T
     # 生成确认信息
     cost_type = context.user_data['cost_type']
     amount = context.user_data['cost_amount']
-    has_receipt = 'cost_receipt' in context.user_data
+    
+    # 检查是否有收据，并处理可能是字典的情况
+    has_receipt = 'cost_receipt' in context.user_data and context.user_data['cost_receipt']
     
     keyboard = [
         [InlineKeyboardButton("✅ Save", callback_data="cost_save")],
