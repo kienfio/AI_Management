@@ -21,22 +21,6 @@ class GoogleDriveUploader:
     """Google Drive文件上传工具类"""
     
     # 文件夹ID映射
-    FOLDER_IDS = {
-        "electricity": os.getenv('DRIVE_FOLDER_ELECTRICITY', "1FXf65K3fY-G4CS49oFr_lxeTltPDrEhh"),  # 电费收据文件夹
-        "water": os.getenv('DRIVE_FOLDER_WATER', "1L2viDKNPbuIX01mnLn5VM2VA_1iIavOh"),             # 水费收据文件夹
-        "Purchasing": os.getenv('DRIVE_FOLDER_PURCHASING', "1kXKGC9bHMeMmFtPPogrvW0xdbVjOjYF8"),    # 购买杂货收据文件夹
-        "wifi": os.getenv('DRIVE_FOLDER_WIFI', "1KjWV4tWHLh1aSM2QcTtfDXXSTbzD1UF4"),                # WiFi收据文件夹
-        "invoice_pdf": os.getenv('DRIVE_FOLDER_INVOICE_PDF', "1msS4CN4byTcZ5awRlfdBJmJ92hf2m2ls")   # 发票PDF文件夹
-    }
-    
-    # 费用类型映射到文件夹类型
-    EXPENSE_TYPE_MAPPING = {
-        "Electricity Bill": "electricity",
-        "Water Bill": "water",
-        "Purchasing": "Purchasing",
-        "WiFi Bill": "wifi"
-    }
-    
     def __init__(self, credentials_file='credentials.json'):
         """
         初始化Google Drive上传器
@@ -46,7 +30,34 @@ class GoogleDriveUploader:
         """
         self.credentials_file = credentials_file
         self.drive_service = None
+        # 延迟初始化FOLDER_IDS，确保环境变量已经设置
+        self.FOLDER_IDS = {}
+        self.EXPENSE_TYPE_MAPPING = {
+            "Electricity Bill": "electricity",
+            "Water Bill": "water",
+            "Purchasing": "Purchasing",
+            "WiFi Bill": "wifi"
+        }
+        self._initialize_folders()
         self._initialize_service()
+    
+    def _initialize_folders(self):
+        """初始化文件夹ID映射，确保使用最新的环境变量"""
+        self.FOLDER_IDS = {
+            "electricity": os.getenv('DRIVE_FOLDER_ELECTRICITY', "1FXf65K3fY-G4CS49oFr_lxeTltPDrEhh"),  # 电费收据文件夹
+            "water": os.getenv('DRIVE_FOLDER_WATER', "1L2viDKNPbuIX01mnLn5VM2VA_1iIavOh"),             # 水费收据文件夹
+            "Purchasing": os.getenv('DRIVE_FOLDER_PURCHASING', "1kXKGC9bHMeMmFtPPogrvW0xdbVjOjYF8"),    # 购买杂货收据文件夹
+            "wifi": os.getenv('DRIVE_FOLDER_WIFI', "1KjWV4tWHLh1aSM2QcTtfDXXSTbzD1UF4"),                # WiFi收据文件夹
+            "invoice_pdf": os.getenv('DRIVE_FOLDER_INVOICE_PDF', "1msS4CN4byTcZ5awRlfdBJmJ92hf2m2ls")   # 发票PDF文件夹
+        }
+        logger.info(f"已初始化文件夹ID映射: {self.FOLDER_IDS}")
+    
+    def reinitialize(self):
+        """重新初始化上传器，确保使用最新的环境变量"""
+        self._initialize_folders()
+        if not self.drive_service:
+            self._initialize_service()
+        return self
     
     def _initialize_service(self):
         """初始化Google Drive服务"""
@@ -302,8 +313,16 @@ class GoogleDriveUploader:
         return mime_types.get(extension, 'application/octet-stream')
 
 
-# 创建全局实例，方便直接导入使用
-drive_uploader = GoogleDriveUploader()
+# 创建全局实例，但不立即初始化
+drive_uploader = None
+
+def get_drive_uploader():
+    """获取或创建GoogleDriveUploader实例"""
+    global drive_uploader
+    if drive_uploader is None:
+        drive_uploader = GoogleDriveUploader()
+        logger.info("已创建GoogleDriveUploader实例")
+    return drive_uploader
 
 # 示例用法
 if __name__ == "__main__":
