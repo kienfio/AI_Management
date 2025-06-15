@@ -148,6 +148,11 @@ class SheetsManager:
             # 获取当前日期作为默认日期
             date_str = data.get('date', datetime.now().strftime('%Y-%m-%d'))
             
+            # 处理收据链接可能是字典的情况
+            receipt = data.get('receipt', '')
+            if isinstance(receipt, dict) and 'public_link' in receipt:
+                receipt = receipt['public_link']
+            
             # 准备数据行
             row = [
                 date_str,                     # Date
@@ -156,7 +161,7 @@ class SheetsManager:
                 float(data.get('amount', 0)), # Amount
                 data.get('category', ''),     # Category
                 data.get('description', ''),  # Description
-                data.get('receipt', '')       # Receipt Link
+                receipt                       # Receipt Link
             ]
             
             # 添加到 Expense Records 表格
