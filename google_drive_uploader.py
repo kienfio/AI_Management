@@ -25,7 +25,8 @@ class GoogleDriveUploader:
         "electricity": os.getenv('DRIVE_FOLDER_ELECTRICITY', "1FXf65K3fY-G4CS49oFr_lxeTltPDrEhh"),  # 电费收据文件夹
         "water": os.getenv('DRIVE_FOLDER_WATER', "1L2viDKNPbuIX01mnLn5VM2VA_1iIavOh"),             # 水费收据文件夹
         "Purchasing": os.getenv('DRIVE_FOLDER_PURCHASING', "1kXKGC9bHMeMmFtPPogrvW0xdbVjOjYF8"),    # 购买杂货收据文件夹
-        "wifi": os.getenv('DRIVE_FOLDER_WIFI', "1KjWV4tWHLh1aSM2QcTtfDXXSTbzD1UF4")                # WiFi收据文件夹
+        "wifi": os.getenv('DRIVE_FOLDER_WIFI', "1KjWV4tWHLh1aSM2QcTtfDXXSTbzD1UF4"),                # WiFi收据文件夹
+        "invoice_pdf": os.getenv('DRIVE_FOLDER_INVOICE_PDF', "1msS4CN4byTcZ5awRlfdBJmJ92hf2m2ls")   # 发票PDF文件夹
     }
     
     # 费用类型映射到文件夹类型
