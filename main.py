@@ -11,20 +11,37 @@ import os
 import base64
 import json
 import sys
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 
-# 设置环境变量
+# 配置日志
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# 首先设置环境变量，确保在导入任何模块前完成
+logger.info("设置环境变量...")
 if not os.getenv('DRIVE_FOLDER_INVOICE_PDF'):
     os.environ['DRIVE_FOLDER_INVOICE_PDF'] = '1msS4CN4byTcZ5awRlfdBJmJ92hf2m2ls'
-    print("已设置DRIVE_FOLDER_INVOICE_PDF环境变量")
+    logger.info("已设置DRIVE_FOLDER_INVOICE_PDF环境变量")
 
 # 尝试加载.env文件
 try:
     from dotenv import load_dotenv
     load_dotenv()
-    print("已加载.env文件")
+    logger.info("已加载.env文件")
 except ImportError:
-    print("dotenv模块未安装，跳过加载.env文件")
+    logger.warning("dotenv模块未安装，跳过加载.env文件")
+
+# 输出所有相关环境变量
+logger.info(f"DRIVE_FOLDER_INVOICE_PDF: {os.getenv('DRIVE_FOLDER_INVOICE_PDF')}")
+logger.info(f"DRIVE_FOLDER_ELECTRICITY: {os.getenv('DRIVE_FOLDER_ELECTRICITY')}")
+logger.info(f"DRIVE_FOLDER_WATER: {os.getenv('DRIVE_FOLDER_WATER')}")
+logger.info(f"DRIVE_FOLDER_PURCHASING: {os.getenv('DRIVE_FOLDER_PURCHASING')}")
+logger.info(f"DRIVE_FOLDER_WIFI: {os.getenv('DRIVE_FOLDER_WIFI')}")
+
+# 现在导入telegram相关模块
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 
 def test_credentials():
     """测试Google API凭证"""
@@ -74,20 +91,17 @@ def test_credentials():
 
 # 先测试凭证再导入配置
 test_credentials()
+
+# 导入其他模块
+logger.info("导入配置模块...")
 from config import BOT_TOKEN
+logger.info("导入处理器模块...")
 from telegram_handlers import (
     # 基础命令
     start_command, help_command, cancel_command, unknown_command, error_handler,
     # 对话处理器
     get_conversation_handlers, register_handlers
 )
-
-# 配置日志
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
 
 def clear_webhook(token):
     """清除现有的webhook设置"""
