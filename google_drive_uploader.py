@@ -63,6 +63,10 @@ class GoogleDriveUploader:
     def _initialize_service(self):
         """初始化Google Drive服务"""
         try:
+            # 添加详细日志
+            logger.info("正在初始化Google Drive服务")
+            logger.info(f"环境变量: GOOGLE_CREDENTIALS_BASE64={os.getenv('GOOGLE_CREDENTIALS_BASE64')[:10] + '...' if os.getenv('GOOGLE_CREDENTIALS_BASE64') else 'Not set'}")
+            
             # ✅ 第三步：加日志打印环境变量
             logger.info(f"[ENV] GOOGLE_CREDENTIALS_BASE64 starts with: {os.getenv('GOOGLE_CREDENTIALS_BASE64')[:10] if os.getenv('GOOGLE_CREDENTIALS_BASE64') else 'Not set'}")
             logger.info(f"[ENV] DRIVE_FOLDER_INVOICE_PDF: {os.getenv('DRIVE_FOLDER_INVOICE_PDF')}")
@@ -235,29 +239,37 @@ class GoogleDriveUploader:
             
             # 获取目标文件夹ID
             folder_id = None
+            drive_folder_type = None
             if isinstance(receipt_type_or_name, str):
                 # 处理特殊情况
                 if receipt_type_or_name == "Water Bill":
-                    folder_id = self._get_folder_id("water")
+                    drive_folder_type = "water"
+                    folder_id = self._get_folder_id(drive_folder_type)
                     logger.info(f"Water Bill特殊处理，文件夹ID: {folder_id}")
                 elif receipt_type_or_name == "Electricity Bill":
-                    folder_id = self._get_folder_id("electricity")
+                    drive_folder_type = "electricity"
+                    folder_id = self._get_folder_id(drive_folder_type)
                     logger.info(f"Electricity Bill特殊处理，文件夹ID: {folder_id}")
                 elif receipt_type_or_name == "WiFi Bill":
-                    folder_id = self.FOLDER_IDS.get("wifi")
+                    drive_folder_type = "wifi"
+                    folder_id = self.FOLDER_IDS.get(drive_folder_type)
                     logger.info(f"WiFi Bill特殊处理，直接获取wifi文件夹ID: {folder_id}")
                 elif receipt_type_or_name == "invoice_pdf":
-                    folder_id = self.FOLDER_IDS.get("invoice_pdf")
+                    drive_folder_type = "invoice_pdf"
+                    folder_id = self.FOLDER_IDS.get(drive_folder_type)
                     logger.info(f"Invoice PDF特殊处理，直接获取invoice_pdf文件夹ID: {folder_id}")
                     if not folder_id:
                         folder_id = os.getenv('DRIVE_FOLDER_INVOICE_PDF')
                         logger.info(f"从环境变量获取PDF文件夹ID: {folder_id}")
                     logger.info(f"最终使用的Invoice PDF文件夹ID: {folder_id}")
                 else:
+                    drive_folder_type = self.EXPENSE_TYPE_MAPPING.get(receipt_type_or_name, receipt_type_or_name)
                     folder_id = self._get_folder_id(receipt_type_or_name)
                 
                 # 日志记录
                 logger.info(f"收据类型: {receipt_type_or_name}, 文件夹ID: {folder_id}")
+                # 添加类型映射日志
+                logger.info(f"上传类型: {receipt_type_or_name}, 映射后类型: {drive_folder_type or receipt_type_or_name}")
             
             # 创建文件元数据
             file_metadata = {
