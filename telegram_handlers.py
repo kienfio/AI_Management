@@ -2585,382 +2585,48 @@ async def upload_invoice_pdf_prompt(update: Update, context: ContextTypes.DEFAUL
     return SALES_INVOICE_PDF
 
 async def sales_invoice_pdf_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理发票PDF上传"""
+    """处理发票PDF上传，带详细日志"""
     try:
-        logger.info("开始处理PDF上传...")
-        
-        # 检查是否是PDF文件
         if not update.message.document:
-            logger.warning("未接收到文档文件")
             await update.message.reply_text("⚠️ 请上传PDF文档")
             return SALES_INVOICE_PDF
-        
+
         document = update.message.document
         file_id = document.file_id
         file_name = document.file_name or f"invoice_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-        
-        logger.info(f"接收到文件: {file_name}, ID: {file_id}, MIME类型: {document.mime_type}")
-        
-        # 检查文件类型和强制设置MIME类型
-        mime_type = 'application/pdf'  # 无论输入是什么,都强制使用PDF MIME类型
-        
+
+        # ✅ 确认 MIME 类型
         if not file_name.lower().endswith('.pdf'):
-            logger.warning(f"文件扩展名不是PDF: {file_name}")
-            # 添加PDF扩展名
-            if '.' not in file_name:
-                file_name = file_name + '.pdf'
-                logger.info(f"添加PDF扩展名,新文件名: {file_name}")
-            else:
-                logger.warning("文件有其他扩展名,但仍然当作PDF处理")
-        
-        # 获取文件对象
-        try:
-            file = await context.bot.get_file(file_id)
-            logger.info(f"获取文件成功: {file.file_path}")
-        except Exception as e:
-            logger.error(f"获取文件失败: {e}")
-            await update.message.reply_text("❌ 获取文件失败，请重试")
+            await update.message.reply_text("⚠️ 请上传 PDF 文件（扩展名为 .pdf）")
             return SALES_INVOICE_PDF
-        
-        # 下载文件内容 - 采用3种方式尝试
-        file_content = None
-        file_stream = None
-        local_file_path = None
-        
-        # 方法1: 下载到内存
-        try:
-            file_stream = io.BytesIO()
-            await file.download_to_memory(out=file_stream)
-            file_stream.seek(0)  # 重置指针位置
-            file_content = file_stream.read()  # 读取全部内容验证
-            file_stream.seek(0)  # 再次重置指针位置
-            
-            # 验证文件内容
-            if len(file_content) > 0:
-                logger.info(f"文件内容下载成功,大小: {len(file_content)} 字节")
-                # 检查PDF头
-                if file_content.startswith(b'%PDF'):
-                    logger.info("验证为有效PDF格式")
-                else:
-                    logger.warning(f"文件头不是PDF格式,但仍然继续处理. 文件头: {file_content[:20].hex()}")
-            else:
-                logger.error("文件内容为空!")
-                raise Exception("下载的文件内容为空")
-        except Exception as e:
-            logger.error(f"内存下载方法失败: {e}")
-            file_stream = None
-        
-        # 方法2: 下载到临时文件
-        if not file_stream or len(file_content) == 0:
-            try:
-                import tempfile
-                temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
-                local_file_path = temp_file.name
-                await file.download_to_drive(custom_path=local_file_path)
-                
-                # 验证文件是否存在和大小
-                if os.path.exists(local_file_path):
-                    file_size = os.path.getsize(local_file_path)
-                    logger.info(f"文件已下载到临时路径: {local_file_path}, 大小: {file_size} 字节")
-                    
-                    # 读取文件内容进行验证
-                    with open(local_file_path, 'rb') as f:
-                        file_content = f.read()
-                        if len(file_content) > 0:
-                            logger.info("临时文件内容有效")
-                        else:
-                            logger.error("临时文件内容为空!")
-                            raise Exception("临时文件内容为空")
-                else:
-                    logger.error(f"临时文件不存在: {local_file_path}")
-                    raise Exception("临时文件下载失败")
-            except Exception as e:
-                logger.error(f"临时文件下载方法失败: {e}")
-                local_file_path = None
-        
-        # 如果两种方法都失败,返回错误
-        if not file_stream and not local_file_path:
-            logger.error("无法下载文件内容,所有方法都失败")
-            await update.message.reply_text("❌ 无法下载文件内容,请重试或尝试其他文件")
-            return SALES_INVOICE_PDF
-        
-                    # 上传到Google Drive
-        try:
-            # 先导入需要的模块
-            from google_drive_uploader import get_drive_uploader
-            from google_sheets import GoogleSheetsManager as SheetsManager
-            
-            # 获取正确初始化的drive_uploader实例
-            try:
-                drive_uploader = get_drive_uploader()
-                
-                # 确保drive_uploader已初始化
-                if not hasattr(drive_uploader, 'drive_service') or drive_uploader.drive_service is None:
-                    logger.error("Google Drive上传器未初始化,尝试使用备用方法")
-                    raise Exception("Drive上传器未初始化")
-                
-                # 重新初始化一次,确保文件夹ID是最新的
-                drive_uploader.reinitialize()
-                    
-                logger.info("开始上传PDF到Google Drive...")
-                pdf_folder_id = drive_uploader.FOLDER_IDS.get('invoice_pdf')
-                logger.info(f"PDF文件夹ID: {pdf_folder_id}")
-                
-                # 如果没有找到文件夹ID,使用默认ID
-                if not pdf_folder_id:
-                    pdf_folder_id = "1msS4CN4byTcZ5awRlfdBJmJ92hf2m2ls"  # 使用硬编码的ID作为备份
-                    logger.info(f"未找到PDF文件夹ID,使用默认ID: {pdf_folder_id}")
-                    
-            except Exception as uploader_err:
-                logger.error(f"创建Drive上传器失败: {uploader_err},尝试使用备用方法")
-                # 尝试使用SheetsManager备用上传方法
-                logger.info("尝试使用SheetsManager备用上传方法...")
-                
-                # 重置文件流位置
-                file_stream.seek(0)
-                
-                # 创建SheetsManager实例
-                sheets_manager = SheetsManager()
-                
-                # 使用SheetsManager的上传方法
-                backup_result = sheets_manager.upload_receipt_to_drive(
-                    file_stream,
-                    f"invoice_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-                    'application/pdf',
-                    'invoice_pdf'
-                )
-                
-                if backup_result:
-                    logger.info(f"备用上传方法成功: {backup_result}")
-                    # 保存PDF链接到用户数据
-                    context.user_data['sales_invoice_pdf'] = backup_result
-                    await update.message.reply_text(f"✅ 发票PDF已上传成功(备用方法)")
-                    # 继续到确认页面
-                    return await show_sales_confirmation(update, context)
-                else:
-                    logger.error("备用上传方法也失败了")
-                    await update.message.reply_text("❌ 发票PDF上传失败,无法使用备用方法")
-                    context.user_data['sales_invoice_pdf'] = None
-                    return SALES_INVOICE_PDF
-            
-            # 确保使用正确的MIME类型
-            mime_type = document.mime_type if document.mime_type else 'application/pdf'
-            # 确保PDF文件使用正确的MIME类型
-            if file_name.lower().endswith('.pdf') and mime_type != 'application/pdf':
-                mime_type = 'application/pdf'
-            logger.info(f"使用MIME类型: {mime_type}")
-            
-            # 确保文件流指针在开头
-            file_stream.seek(0)
-            logger.info("已重置文件流指针位置")
-            
-            # 执行上传
-            # 确保正确传递参数,明确指定"invoice_pdf"作为receipt_type和正确的MIME类型
-            logger.info(f"准备上传PDF,MIME类型: {mime_type}, 文件夹类型: invoice_pdf")
-            logger.info(f"环境变量DRIVE_FOLDER_INVOICE_PDF: {os.getenv('DRIVE_FOLDER_INVOICE_PDF', '未设置')}")
-            logger.info(f"文件流状态: 位置={file_stream.tell()}, 可读={file_stream.readable()}")
-            logger.info(f"文件夹ID映射: {drive_uploader.FOLDER_IDS}")
-            
-            # 重置文件流位置
-            file_stream.seek(0)
-            
-            # 临时保存文件内容到日志中查看
-            try:
-                # 读取前100字节查看文件头
-                file_content_head = file_stream.read(100)
-                file_stream.seek(0)  # 重新定位到开头
-                logger.info(f"文件头部内容(前100字节HEX): {file_content_head.hex()[:100]}")
-                # PDF文件头部应该是%PDF开头
-                if file_content_head.startswith(b'%PDF'):
-                    logger.info("文件头部确认为有效PDF格式")
-                else:
-                    logger.warning("文件可能不是有效的PDF格式!")
-            except Exception as e:
-                logger.error(f"读取文件内容失败: {e}")
-                file_stream.seek(0)  # 确保重置到开头
-            
-            # 尝试上传 - 优先使用本地文件路径
-            result = None
-            
-            # 尝试方法1: 如果有本地文件路径,直接使用它上传
-            if local_file_path and os.path.exists(local_file_path):
-                try:
-                    logger.info(f"尝试使用已下载的本地文件上传: {local_file_path}")
-                    result = drive_uploader.upload_receipt(local_file_path, "invoice_pdf", mime_type)
-                    logger.info(f"本地文件上传结果: {result}")
-                except Exception as e:
-                    logger.error(f"本地文件上传失败: {e}")
-                    result = None
-                    
-                # 如果使用完毕,清理临时文件
-                if result:
-                    try:
-                        os.unlink(local_file_path)
-                        logger.info(f"已删除临时文件: {local_file_path}")
-                    except Exception as e:
-                        logger.error(f"删除临时文件失败: {e}")
-            
-            # 尝试方法2: 如果本地文件上传失败,使用文件流(如果可用)
-            if not result and file_stream:
-                try:
-                    logger.info("尝试使用文件流方式上传...")
-                    file_stream.seek(0)  # 确保重置位置
-                    result = drive_uploader.upload_receipt(file_stream, "invoice_pdf", mime_type)
-                    logger.info(f"文件流上传结果: {result}")
-                except Exception as e:
-                    logger.error(f"文件流上传失败: {e}")
-                    result = None
-            
-            # 尝试方法3: 如果上述方法都失败,创建新的临时文件再试一次
-            if not result and file_content:
-                try:
-                    # 创建新的临时文件
-                    import tempfile
-                    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
-                    temp_file_path = temp_file.name
-                    temp_file.write(file_content)
-                    temp_file.close()
-                    
-                    logger.info(f"已创建新的临时文件: {temp_file_path}")
-                    
-                    # 尝试使用临时文件路径上传
-                    logger.info("尝试使用新临时文件上传...")
-                    result = drive_uploader.upload_receipt(temp_file_path, "invoice_pdf", mime_type)
-                    logger.info(f"新临时文件上传结果: {result}")
-                    
-                    # 清理临时文件
-                    try:
-                        os.unlink(temp_file_path)
-                        logger.info(f"已删除新临时文件: {temp_file_path}")
-                    except Exception as e:
-                        logger.error(f"删除新临时文件失败: {e}")
-                        
-                except Exception as e:
-                    logger.error(f"新临时文件处理失败: {e}")
-                    result = None
-            
-            logger.info(f"上传结果: {result}")
-            
-            if result:
-                # 保存PDF链接到用户数据
-                if isinstance(result, dict):
-                    context.user_data['sales_invoice_pdf'] = result
-                    public_link = result.get('public_link', '')
-                    logger.info(f"PDF上传成功，链接: {public_link}")
-                    await update.message.reply_text(f"✅ 发票PDF已上传成功")
-                else:
-                    context.user_data['sales_invoice_pdf'] = result
-                    logger.info(f"PDF上传成功，链接: {result}")
-                    await update.message.reply_text(f"✅ 发票PDF已上传成功")
-            else:
-                logger.error("Google Drive上传结果为空,尝试使用备用上传方法")
-                
-                # 备用方法1: 使用SheetsManager上传
-                backup_result = None
-                try:
-                    # 创建SheetsManager实例
-                    from google_sheets import GoogleSheetsManager
-                    sheets_manager = GoogleSheetsManager()
-                    
-                    # 确保文件内容有效
-                    if file_content:
-                        backup_file_stream = io.BytesIO(file_content)
-                    elif file_stream:
-                        file_stream.seek(0)
-                        backup_file_stream = file_stream
-                    else:
-                        raise Exception("没有有效的文件内容")
-                    
-                    # 尝试上传
-                    logger.info("尝试使用SheetsManager备用上传方法...")
-                    backup_result = sheets_manager.upload_receipt_to_drive(
-                        backup_file_stream,
-                        file_name,
-                        'application/pdf',
-                        'invoice_pdf'
-                    )
-                    logger.info(f"备用上传结果: {backup_result}")
-                except Exception as e:
-                    logger.error(f"备用上传方法失败: {e}")
-                    backup_result = None
-                
-                # 备用方法2: 使用硬编码ID直接上传
-                if not backup_result and file_content:
-                    try:
-                        logger.info("尝试使用硬编码ID直接上传...")
-                        
-                        # 创建GoogleDriveUploader实例,使用硬编码参数
-                        from google_drive_uploader import GoogleDriveUploader
-                        direct_uploader = GoogleDriveUploader()
-                        direct_uploader.FOLDER_IDS = {'invoice_pdf': '1msS4CN4byTcZ5awRlfdBJmJ92hf2m2ls'}
-                        
-                        # 创建新的文件流
-                        direct_file_stream = io.BytesIO(file_content)
-                        
-                        # 直接使用upload_file方法
-                        direct_result = direct_uploader.upload_file(
-                            direct_file_stream, 
-                            file_name,
-                            'application/pdf',
-                            folder_id='1msS4CN4byTcZ5awRlfdBJmJ92hf2m2ls'
-                        )
-                        logger.info(f"直接上传结果: {direct_result}")
-                        backup_result = direct_result
-                    except Exception as e:
-                        logger.error(f"直接上传方法失败: {e}")
-                        backup_result = None
-                
-                # 使用备用结果
-                if backup_result:
-                    context.user_data['sales_invoice_pdf'] = backup_result
-                    if isinstance(backup_result, dict):
-                        public_link = backup_result.get('public_link', '')
-                        logger.info(f"PDF备用上传成功，链接: {public_link}")
-                    else:
-                        logger.info(f"PDF备用上传成功，链接: {backup_result}")
-                    await update.message.reply_text(f"✅ 发票PDF已上传成功(备用方法)")
-                else:
-                    logger.error("所有上传方法都失败")
-                    await update.message.reply_text("❌ 发票PDF上传失败")
-                    context.user_data['sales_invoice_pdf'] = None
-        except Exception as e:
-            # 记录详细的错误信息
-            logger.error(f"上传发票PDF失败: {e}", exc_info=True)  # 记录完整堆栈信息
-            logger.error(f"失败详情 - MIME类型: {mime_type}, 文件名: {file_name}")
-            
-            # 检查drive_uploader状态
-            try:
-                logger.error(f"上传器文件夹ID: {drive_uploader.FOLDER_IDS}")
-                logger.error(f"上传器服务状态: {'已初始化' if drive_uploader.drive_service else '未初始化'}")
-                
-                # 检查环境变量
-                env_folder_id = os.getenv('DRIVE_FOLDER_INVOICE_PDF')
-                logger.error(f"环境变量DRIVE_FOLDER_INVOICE_PDF: {env_folder_id if env_folder_id else '未设置'}")
-                
-                # 尝试检查凭证状态
-                cred_status = "已设置" if os.getenv('GOOGLE_CREDENTIALS_BASE64') else "未设置"
-                logger.error(f"环境变量GOOGLE_CREDENTIALS_BASE64: {cred_status}")
-                
-                # 检查文件是否存在
-                if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
-                    file_size = os.path.getsize(temp_file_path)
-                    logger.error(f"临时文件存在,大小: {file_size} 字节")
-                else:
-                    logger.error("临时文件不存在或未创建")
-                
-            except Exception as status_err:
-                logger.error(f"无法获取上传器状态信息: {status_err}")
-            
-            error_message = f"❌ 发票PDF上传失败\n\n可能原因:\n1. 文件格式不兼容\n2. 网络连接问题\n3. 服务器暂时不可用\n\n请稍后再试或联系管理员"
-                
-            await update.message.reply_text(error_message)
+
+        # ✅ 获取 Telegram 文件对象
+        file = await context.bot.get_file(file_id)
+        logger.info(f"[UPLOAD] 准备下载 Telegram 文件: file_id={file_id}, file_name={file_name}")
+
+        # ✅ 下载文件为 BytesIO
+        file_stream = io.BytesIO()
+        await file.download_to_memory(out=file_stream)
+        file_stream.seek(0)
+        logger.info(f"[UPLOAD] 下载完成，大小: {file_stream.getbuffer().nbytes} bytes")
+
+        # ✅ 上传到 Google Drive
+        from google_drive_uploader import drive_uploader
+
+        result = drive_uploader.upload_receipt(file_stream, "invoice_pdf", mime_type="application/pdf")
+        logger.info(f"[UPLOAD] 上传结果: {result}")
+
+        if result:
+            context.user_data['sales_invoice_pdf'] = result
+            public_link = result.get('public_link', '')
+            await update.message.reply_text(f"✅ 发票PDF已上传: {public_link}")
+        else:
+            await update.message.reply_text("❌ 发票PDF上传失败（返回结果为空）")
             context.user_data['sales_invoice_pdf'] = None
-        
-        # 继续到确认页面
-        logger.info("继续到确认页面...")
+
         return await show_sales_confirmation(update, context)
-        
+
     except Exception as e:
-        logger.error(f"处理发票PDF时出错: {e}", exc_info=True)  # 记录完整堆栈信息
-        await update.message.reply_text("❌ 处理发票PDF时出错，请重试")
+        logger.exception("[UPLOAD] 上传发票PDF失败")
+        await update.message.reply_text("❌ 上传出错，请稍后重试")
         return SALES_INVOICE_PDF
