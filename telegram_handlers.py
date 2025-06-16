@@ -648,8 +648,8 @@ async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             'type': client_type,  # "Agent" 或 "Company"
             'agent_name': agent_name,
             'agent_ic': agent_ic,
-            'comm_rate': context.user_data.get('commission_rate', 0),
-            'comm_amount': context.user_data['sales_commission'],
+            'commission_rate': context.user_data.get('commission_rate', 0),  # 修正键名为commission_rate
+            'commission_amount': context.user_data['sales_commission'],      # 修正键名为commission_amount
             'invoice_pdf': pdf_link  # 添加PDF链接
         }
         
