@@ -11,6 +11,7 @@ import re
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 import io
+import asyncio
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
@@ -2665,7 +2666,14 @@ async def sales_invoice_pdf_handler(update: Update, context: ContextTypes.DEFAUL
                     logger.info(f"PDF上传成功，链接: {result}")
                     
                     # 更新处理中的消息
-                    await processing_message.edit_text("✅ 发票PDF已上传成功")
+                    success_message = await update.message.reply_text("✅ 发票PDF已上传成功")
+                    
+                    # 等待一秒让用户看到成功消息
+                    await asyncio.sleep(1)
+                    
+                    # 删除处理中和成功消息
+                    await processing_message.delete()
+                    await success_message.delete()
                     
                     # 继续到确认页面
                     return await show_sales_confirmation(update, context)
@@ -2690,7 +2698,15 @@ async def sales_invoice_pdf_handler(update: Update, context: ContextTypes.DEFAUL
                     
                     if backup_result:
                         context.user_data['sales_invoice_pdf'] = backup_result
-                        await processing_message.edit_text("✅ 发票PDF已上传成功(备用方法)")
+                        success_message = await update.message.reply_text("✅ 发票PDF已上传成功(备用方法)")
+                        
+                        # 等待一秒让用户看到成功消息
+                        await asyncio.sleep(1)
+                        
+                        # 删除处理中和成功消息
+                        await processing_message.delete()
+                        await success_message.delete()
+                        
                         return await show_sales_confirmation(update, context)
                     else:
                         raise Exception("备用上传失败")
