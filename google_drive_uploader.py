@@ -150,9 +150,9 @@ class GoogleDriveUploader:
         
         Args:
             file_path_or_stream: 本地文件路径或文件流对象
-            receipt_type_or_name: 收据类型("electricity", "water", "Purchasing")或文件名
+            receipt_type_or_name: 收据类型("electricity", "water", "Purchasing", "invoice_pdf")或文件名
                                   如果是文件名，将使用默认文件夹
-            mime_type: 文件MIME类型
+            mime_type: 文件MIME类型(例如'image/jpeg','application/pdf'等)
         
         Returns:
             dict: 包含文件ID和公开链接的字典，或者直接返回公开链接字符串(兼容旧代码)
@@ -214,9 +214,17 @@ class GoogleDriveUploader:
                 elif receipt_type_or_name == "invoice_pdf":
                     folder_id = self.FOLDER_IDS.get("invoice_pdf")
                     logger.info(f"Invoice PDF特殊处理，直接获取invoice_pdf文件夹ID: {folder_id}")
+                    # 如果环境变量中没有设置,则先尝试从系统环境变量获取
                     if not folder_id:
-                        folder_id = "1msS4CN4byTcZ5awRlfdBJmJ92hf2m2ls"  # 使用硬编码的ID作为备份
-                        logger.info(f"使用硬编码的Invoice PDF文件夹ID: {folder_id}")
+                        env_folder_id = os.getenv('DRIVE_FOLDER_INVOICE_PDF')
+                        if env_folder_id:
+                            folder_id = env_folder_id
+                            logger.info(f"从环境变量获取PDF文件夹ID: {folder_id}")
+                        else:
+                            folder_id = "1msS4CN4byTcZ5awRlfdBJmJ92hf2m2ls"  # 使用硬编码的ID作为备份
+                            logger.info(f"使用硬编码的Invoice PDF文件夹ID: {folder_id}")
+                    # 验证文件夹ID是否有效
+                    logger.info(f"最终使用的Invoice PDF文件夹ID: {folder_id}")
                 else:
                     folder_id = self._get_folder_id(receipt_type_or_name)
                 
@@ -330,7 +338,14 @@ class GoogleDriveUploader:
             '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         }
         
-        return mime_types.get(extension, 'application/octet-stream')
+        # 如果是PDF文件,确保使用正确的MIME类型
+        if extension == '.pdf':
+            logger.info(f"检测到PDF文件: {file_path}")
+            return 'application/pdf'
+        
+        mime_type = mime_types.get(extension, 'application/octet-stream')
+        logger.info(f"文件 {file_path} 使用MIME类型: {mime_type}")
+        return mime_type
 
 
 # 创建全局实例，但不立即初始化
