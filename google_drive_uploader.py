@@ -9,6 +9,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload
 from google.oauth2 import service_account
 from google.oauth2.credentials import Credentials
+import mimetypes
 
 # 配置日志
 logging.basicConfig(
@@ -148,7 +149,38 @@ class GoogleDriveUploader:
         logger.info(f"最终使用的文件夹ID: {folder_id}")
         return folder_id
     
-    def upload_receipt(self, file_path_or_stream, receipt_type_or_name, mime_type='image/jpeg'):
+    def detect_mime_type(self, file_path_or_stream, fallback_name=None):
+        """
+        自动检测文件的 MIME 类型（支持路径或文件流）
+        
+        Args:
+            file_path_or_stream: 文件路径(str) 或 文件流对象(BytesIO)
+            fallback_name: 若为文件流时，额外提供的文件名以辅助判断
+        
+        Returns:
+            str: MIME 类型字符串，例如 'application/pdf' 或 'image/jpeg'
+        """
+        logger.info(f"尝试检测MIME类型: path_or_stream={type(file_path_or_stream)}, fallback_name={fallback_name}")
+        
+        if isinstance(file_path_or_stream, str):
+            mime_type, _ = mimetypes.guess_type(file_path_or_stream)
+            logger.info(f"从文件路径检测MIME类型: {file_path_or_stream} -> {mime_type}")
+            return mime_type or 'application/octet-stream'
+        
+        elif hasattr(file_path_or_stream, 'name'):  # 文件流带有 name 属性
+            mime_type, _ = mimetypes.guess_type(file_path_or_stream.name)
+            logger.info(f"从文件流name属性检测MIME类型: {file_path_or_stream.name} -> {mime_type}")
+            return mime_type or 'application/octet-stream'
+        
+        elif fallback_name:  # 人工指定文件名作为辅助判断
+            mime_type, _ = mimetypes.guess_type(fallback_name)
+            logger.info(f"从fallback_name检测MIME类型: {fallback_name} -> {mime_type}")
+            return mime_type or 'application/octet-stream'
+        
+        logger.info("无法检测MIME类型，使用默认值")
+        return 'application/octet-stream'  # 默认兜底
+    
+    def upload_receipt(self, file_path_or_stream, receipt_type_or_name, mime_type=None):
         """
         根据收据类型上传文件到指定Google Drive文件夹
         
@@ -156,25 +188,18 @@ class GoogleDriveUploader:
             file_path_or_stream: 本地文件路径或文件流对象
             receipt_type_or_name: 收据类型("electricity", "water", "Purchasing", "invoice_pdf")或文件名
                                   如果是文件名，将使用默认文件夹
-            mime_type: 文件MIME类型(例如'image/jpeg','application/pdf'等)
+            mime_type: 文件MIME类型(例如'image/jpeg','application/pdf'等)，如未指定则自动检测
         
         Returns:
             dict: 包含文件ID和公开链接的字典，或者直接返回公开链接字符串(兼容旧代码)
         """
         try:
-            # 导入json模块用于错误处理
-            import json
+            # 如果未传入 mime_type，则自动检测
+            if mime_type is None:
+                mime_type = self.detect_mime_type(file_path_or_stream, fallback_name=receipt_type_or_name)
             
             # 添加日志，记录上传参数
             logger.info(f"上传收据，类型: {receipt_type_or_name}, MIME类型: {mime_type}")
-            
-            # ✅ 第二步：确保上传器支持文件流 + MIME 类型
-            # 查看upload_receipt函数中的代码:
-            # if isinstance(file, str):
-            #    media = MediaFileUpload(file, mimetype=mime_type, resumable=True)
-            # else:
-            #    media = MediaIoBaseUpload(file, mimetype=mime_type, resumable=True)
-            # 务必确保你传入的是PDF文件,而不是误传了image/jpeg,否则Google Drive会当成图片处理
             
             # 确定是文件路径还是文件流
             is_file_path = isinstance(file_path_or_stream, str)
@@ -257,10 +282,6 @@ class GoogleDriveUploader:
             if is_file_path:
                 if not os.path.exists(file_path_or_stream):
                     raise FileNotFoundError(f"文件不存在: {file_path_or_stream}")
-                
-                # 获取文件MIME类型
-                if mime_type == 'image/jpeg':
-                    mime_type = self._get_mime_type(file_path_or_stream)
                 
                 media = MediaFileUpload(file_path_or_stream, mimetype=mime_type, resumable=True)
                 logger.info(f"创建文件上传对象: 文件路径: {file_path_or_stream}, MIME类型: {mime_type}")
@@ -395,6 +416,11 @@ if __name__ == "__main__":
         # 示例：使用费用类型映射
         result = uploader.upload_receipt('path/to/electricity_bill.jpg', 'Electricity Bill')
         print(f"电费收据上传成功! 文件ID: {result['file_id']}")
+        
+        # 示例：上传发票PDF
+        result = uploader.upload_receipt(file_stream, "invoice_pdf", mime_type="application/pdf")
+        print(f"发票PDF上传成功! 文件ID: {result['file_id']}")
+        print(f"公开链接: {result['public_link']}")
         
     except Exception as e:
         print(f"错误: {e}") 
