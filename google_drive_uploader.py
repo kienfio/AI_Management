@@ -62,6 +62,10 @@ class GoogleDriveUploader:
     def _initialize_service(self):
         """初始化Google Drive服务"""
         try:
+            # ✅ 第三步：加日志打印环境变量
+            logger.info(f"[ENV] GOOGLE_CREDENTIALS_BASE64 starts with: {os.getenv('GOOGLE_CREDENTIALS_BASE64')[:10] if os.getenv('GOOGLE_CREDENTIALS_BASE64') else 'Not set'}")
+            logger.info(f"[ENV] DRIVE_FOLDER_INVOICE_PDF: {os.getenv('DRIVE_FOLDER_INVOICE_PDF')}")
+            
             # 定义需要的权限范围
             SCOPES = ['https://www.googleapis.com/auth/drive']
             
@@ -163,6 +167,14 @@ class GoogleDriveUploader:
             
             # 添加日志，记录上传参数
             logger.info(f"上传收据，类型: {receipt_type_or_name}, MIME类型: {mime_type}")
+            
+            # ✅ 第二步：确保上传器支持文件流 + MIME 类型
+            # 查看upload_receipt函数中的代码:
+            # if isinstance(file, str):
+            #    media = MediaFileUpload(file, mimetype=mime_type, resumable=True)
+            # else:
+            #    media = MediaIoBaseUpload(file, mimetype=mime_type, resumable=True)
+            # 务必确保你传入的是PDF文件,而不是误传了image/jpeg,否则Google Drive会当成图片处理
             
             # 确定是文件路径还是文件流
             is_file_path = isinstance(file_path_or_stream, str)
