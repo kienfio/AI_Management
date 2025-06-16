@@ -191,6 +191,10 @@ class GoogleDriveUploader:
             dict: 包含文件ID和公开链接的字典，或者直接返回公开链接字符串(兼容旧代码)
         """
         try:
+            # 添加PDF专用上传逻辑
+            if receipt_type_or_name == "invoice_pdf":
+                return self._upload_invoice_pdf(file_path_or_stream, mime_type)
+            
             # 如果未传入 mime_type，则自动检测
             if mime_type is None:
                 mime_type = self.detect_mime_type(file_path_or_stream, fallback_name=receipt_type_or_name)
@@ -328,6 +332,67 @@ class GoogleDriveUploader:
             if not is_file_path and not isinstance(receipt_type_or_name, str):
                 return None  # 兼容旧代码
             raise
+    
+    def _upload_invoice_pdf(self, file_stream, mime_type=None):
+        """专用方法上传发票PDF到指定文件夹"""
+        from datetime import datetime
+        
+        logger.info("开始上传发票PDF到专用文件夹")
+        
+        # 确保使用正确的文件夹ID
+        folder_id = os.getenv('DRIVE_FOLDER_INVOICE_PDF')
+        if not folder_id:
+            logger.error("未配置发票PDF文件夹环境变量")
+            raise ValueError("未配置发票PDF文件夹环境变量")
+        
+        # 生成文件名
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_name = f"invoice_{timestamp}.pdf"
+        
+        # 创建文件元数据
+        file_metadata = {
+            'name': file_name,
+            'parents': [folder_id]
+        }
+        
+        # 确保使用正确的MIME类型
+        if mime_type is None:
+            mime_type = 'application/pdf'
+        
+        # 创建媒体对象
+        if hasattr(file_stream, 'seek'):
+            file_stream.seek(0)
+        
+        media = MediaIoBaseUpload(file_stream, mimetype=mime_type, resumable=True)
+        logger.info(f"创建PDF上传对象: 文件名: {file_name}, MIME类型: {mime_type}, 文件夹ID: {folder_id}")
+        
+        # 执行上传
+        logger.info("开始上传PDF文件...")
+        file = self.drive_service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id, webViewLink'
+        ).execute()
+        
+        file_id = file.get('id')
+        logger.info(f"PDF文件上传成功，文件ID: {file_id}")
+        
+        # 设置文件权限为"任何人都可以查看"
+        logger.info("设置PDF文件权限为公开...")
+        self.drive_service.permissions().create(
+            fileId=file_id,
+            body={'type': 'anyone', 'role': 'reader'},
+            fields='id'
+        ).execute()
+        
+        public_link = file.get('webViewLink', '')
+        logger.info(f"生成PDF公开链接: {public_link}")
+        
+        # 返回包含ID和链接的字典
+        return {
+            'file_id': file_id,
+            'public_link': public_link
+        }
     
     def upload_receipt_to_drive(self, file_stream, file_name, mime_type='image/jpeg'):
         """
