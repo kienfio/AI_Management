@@ -1119,8 +1119,30 @@ async def cost_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         # 获取费用类型
         cost_type = context.user_data.get('cost_type', '')
         
-        # 添加日志，记录费用类型
-        logger.info(f"上传收据，费用类型: {cost_type}")
+        # 添加日志，记录原始费用类型
+        logger.info(f"上传收据，原始费用类型: {cost_type}")
+        
+        # 处理特殊类型映射 - 将显示名称转换为文件夹类型
+        type_mapping = {
+            "water bill": "water",
+            "electricity bill": "electricity",
+            "wifi bill": "wifi",
+            "purchasing": "purchasing"
+        }
+        
+        # 转换为小写进行匹配
+        cost_type_lower = cost_type.lower()
+        drive_folder_type = type_mapping.get(cost_type_lower, cost_type)
+        
+        # 添加日志，记录映射后的类型
+        logger.info(f"映射后的文件夹类型: {drive_folder_type}")
+        
+        # 检测是否为PDF文件
+        is_pdf = False
+        mime_type = file.mime_type if hasattr(file, 'mime_type') else 'image/jpeg'
+        if mime_type == 'application/pdf' or (hasattr(file, 'file_name') and file.file_name.lower().endswith('.pdf')):
+            is_pdf = True
+            logger.info("检测到PDF文件")
         
         # 直接使用GoogleDriveUploader上传文件
         try:
@@ -1130,14 +1152,23 @@ async def cost_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             drive_uploader = get_drive_uploader()
             
             # 上传文件
-            mime_type = file.mime_type if hasattr(file, 'mime_type') else 'image/jpeg'
-            logger.info(f"使用MIME类型: {mime_type}, 费用类型: {cost_type}")
+            logger.info(f"使用MIME类型: {mime_type}, 文件夹类型: {drive_folder_type}")
             
-            receipt_result = drive_uploader.upload_receipt(
-                file_stream, 
-                cost_type,  # 传递费用类型
-                mime_type
-            )
+            # 如果是PDF文件，使用专用处理
+            if is_pdf:
+                logger.info("使用PDF专用上传逻辑")
+                receipt_result = drive_uploader.upload_receipt(
+                    file_stream, 
+                    "invoice_pdf",  # 明确指定为PDF类型
+                    'application/pdf'
+                )
+            else:
+                # 普通收据上传
+                receipt_result = drive_uploader.upload_receipt(
+                    file_stream, 
+                    drive_folder_type,  # 使用映射后的类型
+                    mime_type
+                )
             
             if receipt_result:
                 # 处理返回结果可能是字典或字符串的情况
