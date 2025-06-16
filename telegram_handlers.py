@@ -523,27 +523,28 @@ async def show_agent_selection(update: Update, context: ContextTypes.DEFAULT_TYP
 # 创建一个辅助函数来显示确认信息
 async def show_sales_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """显示销售确认信息"""
-    # 获取数据
-    person = context.user_data['sales_person']
-    amount = context.user_data['sales_amount']
-    client_type = context.user_data['sales_client']
-    bill_to = context.user_data.get('bill_to', '')
-    
-    # 获取佣金信息
-    commission_amount = context.user_data['sales_commission']
-    commission_rate = context.user_data.get('commission_rate', 0)
-    commission_type = context.user_data.get('commission_type', '')
-    
-    # 获取代理商信息
-    agent_info = ""
-    if client_type == "Agent" and 'sales_agent' in context.user_data:
-        agent_info = context.user_data['sales_agent']
-    
-    # 检查是否已上传PDF
-    has_pdf = 'sales_invoice_pdf' in context.user_data and context.user_data['sales_invoice_pdf']
-    
-    # 构建确认消息
-    confirm_message = f"""
+    try:
+        # 获取数据
+        person = context.user_data['sales_person']
+        amount = context.user_data['sales_amount']
+        client_type = context.user_data['sales_client']
+        bill_to = context.user_data.get('bill_to', '')
+        
+        # 获取佣金信息
+        commission_amount = context.user_data['sales_commission']
+        commission_rate = context.user_data.get('commission_rate', 0)
+        commission_type = context.user_data.get('commission_type', '')
+        
+        # 获取代理商信息
+        agent_info = ""
+        if client_type == "Agent" and 'sales_agent' in context.user_data:
+            agent_info = context.user_data['sales_agent']
+        
+        # 检查是否已上传PDF
+        has_pdf = 'sales_invoice_pdf' in context.user_data and context.user_data['sales_invoice_pdf']
+        
+        # 构建确认消息
+        confirm_message = f"""
 💼 <b>SALES CONFIRMATION</b>
 
 👤 <b>Personal in Charge:</b> {person}
@@ -552,48 +553,72 @@ async def show_sales_confirmation(update: Update, context: ContextTypes.DEFAULT_
 🏢 <b>Type:</b> {client_type}
 """
 
-    if agent_info:
-        confirm_message += f"🧑‍💼 <b>Agent:</b> {agent_info}\n"
-    
-    # 添加佣金信息
-    if commission_type == 'percent':
-        confirm_message += f"💵 <b>Commission:</b> RM{commission_amount:,.2f} ({commission_rate*100}%)\n"
-    else:
-        confirm_message += f"💵 <b>Commission:</b> RM{commission_amount:,.2f} (Fixed)\n"
-    
-    # 添加PDF信息
-    if has_pdf:
-        confirm_message += "📄 <b>Invoice PDF:</b> Uploaded\n"
-    
-    confirm_message += "\n<b>Please confirm the information:</b>"
-    
-    # 添加确认按钮
-    keyboard = []
-    
-    # 如果尚未上传PDF，添加上传PDF按钮
-    if not has_pdf:
-        keyboard.append([InlineKeyboardButton("📄 Upload Invoice PDF", callback_data="upload_invoice_pdf")])
-    
-    keyboard.append([InlineKeyboardButton("✅ Save", callback_data="sales_save")])
-    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="back_sales")])
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    # 处理不同类型的更新
-    if update.callback_query:
-        await update.callback_query.answer()
-        await update.callback_query.edit_message_text(
-            confirm_message,
-            parse_mode=ParseMode.HTML,
-            reply_markup=reply_markup
-        )
-    else:
-        await update.message.reply_html(
-            confirm_message,
-            reply_markup=reply_markup
-        )
-    
-    return SALES_CONFIRM
+        if agent_info:
+            confirm_message += f"🧑‍💼 <b>Agent:</b> {agent_info}\n"
+        
+        # 添加佣金信息
+        if commission_type == 'percent':
+            confirm_message += f"💵 <b>Commission:</b> RM{commission_amount:,.2f} ({commission_rate*100}%)\n"
+        else:
+            confirm_message += f"💵 <b>Commission:</b> RM{commission_amount:,.2f} (Fixed)\n"
+        
+        # 添加PDF信息
+        if has_pdf:
+            confirm_message += "📄 <b>Invoice PDF:</b> Uploaded\n"
+        
+        confirm_message += "\n<b>Please confirm the information:</b>"
+        
+        # 添加确认按钮
+        keyboard = []
+        
+        # 如果尚未上传PDF，添加上传PDF按钮
+        if not has_pdf:
+            keyboard.append([InlineKeyboardButton("📄 Upload Invoice PDF", callback_data="upload_invoice_pdf")])
+        
+        keyboard.append([InlineKeyboardButton("✅ Save", callback_data="sales_save")])
+        keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="back_sales")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # 处理不同类型的更新
+        if update.callback_query:
+            await update.callback_query.answer()
+            await update.callback_query.edit_message_text(
+                confirm_message,
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
+            )
+        else:
+            # 如果是从PDF上传处理器调用，删除之前的消息
+            if hasattr(update, 'message') and update.message:
+                try:
+                    # 尝试删除"上传成功"的消息
+                    await update.message.delete()
+                except Exception as e:
+                    logger.error(f"删除消息失败: {e}")
+            
+            # 发送新的确认消息
+            await update.message.reply_html(
+                confirm_message,
+                reply_markup=reply_markup
+            )
+        
+        return SALES_CONFIRM
+        
+    except Exception as e:
+        logger.error(f"显示确认信息失败: {e}")
+        error_message = "❌ Error showing confirmation. Please try again."
+        
+        if update.callback_query:
+            await update.callback_query.answer()
+            await update.callback_query.edit_message_text(
+                error_message,
+                parse_mode=ParseMode.HTML
+            )
+        else:
+            await update.message.reply_text(error_message)
+        
+        return ConversationHandler.END
 
 async def sales_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """保存销售记录"""
