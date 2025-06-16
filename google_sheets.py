@@ -132,11 +132,114 @@ class GoogleSheetsManager:
             # 确保所有工作表存在
             self._ensure_worksheets_exist()
             
+            # 检查并修复现有表格的格式
+            self._check_and_fix_existing_sheets()
+            
             logger.info("✅ Google Sheets 客户端初始化成功")
             
         except Exception as e:
             logger.error(f"❌ Google Sheets 初始化失败: {e}")
             raise
+    
+    def _check_and_fix_existing_sheets(self):
+        """检查并修复现有表格的格式"""
+        try:
+            # 检查销售记录表
+            sales_worksheet = self.get_worksheet(SHEET_NAMES['sales'])
+            if sales_worksheet:
+                self._fix_sheet_format(sales_worksheet, 'sales')
+            
+            # 检查费用记录表
+            expenses_worksheet = self.get_worksheet(SHEET_NAMES['expenses'])
+            if expenses_worksheet:
+                self._fix_sheet_format(expenses_worksheet, 'expenses')
+                
+            # 其他表格也可以添加...
+                
+        except Exception as e:
+            logger.error(f"检查和修复表格格式失败: {e}")
+    
+    def _fix_sheet_format(self, worksheet, sheet_type):
+        """修复特定表格的格式"""
+        try:
+            # 获取当前数据
+            all_values = worksheet.get_all_values()
+            
+            # 如果表格为空或只有表头,无需修复
+            if not all_values:
+                return
+                
+            # 检查第一行是否为空行(用于总和)
+            first_row_is_sum = False
+            if all_values and all_values[0]:
+                # 检查第一行是否包含求和公式
+                for cell in all_values[0]:
+                    if cell and cell.startswith('=SUM'):
+                        first_row_is_sum = True
+                        break
+            
+            # 如果已经有正确的格式(有空行,有求和公式),无需修复
+            if first_row_is_sum:
+                logger.info(f"表格 {sheet_type} 已有正确格式,无需修复")
+                return
+                
+            # 获取表头和数据行
+            if len(all_values) <= 1:
+                # 只有表头或为空,只需添加空行
+                headers = all_values[0] if all_values else []
+                data_rows = []
+            else:
+                # 有数据行
+                headers = all_values[0]
+                data_rows = all_values[1:]
+            
+            # 清空工作表(谨慎操作!)
+            worksheet.clear()
+            
+            # 添加空行(用于总和)
+            worksheet.append_row([''] * len(headers) if headers else [''] * 12)  # 默认12列
+            
+            # 添加表头
+            if headers:
+                worksheet.append_row(headers)
+            elif sheet_type == 'sales':
+                worksheet.append_row(SALES_HEADERS)
+            elif sheet_type == 'expenses':
+                worksheet.append_row(EXPENSES_HEADERS)
+            
+            # 添加所有数据行
+            for row in data_rows:
+                worksheet.append_row(row)
+            
+            # 设置表头格式为加粗
+            if sheet_type == 'sales':
+                worksheet.format('A2:L2', {'textFormat': {'bold': True}})
+            elif sheet_type == 'expenses':
+                worksheet.format('A2:G2', {'textFormat': {'bold': True}})
+            
+            # 添加求和公式
+            if sheet_type == 'sales':
+                # 计算最后一行的行号
+                last_row = len(data_rows) + 2  # 空行+表头+数据行数
+                # 设置Amount列(E列)总和
+                worksheet.update_cell(1, 5, f'=SUM(E3:E{last_row})')
+                # 设置Comm Amount列(K列)总和
+                worksheet.update_cell(1, 11, f'=SUM(K3:K{last_row})')
+                # 设置总和单元格格式为加粗
+                worksheet.format('E1', {'textFormat': {'bold': True}})
+                worksheet.format('K1', {'textFormat': {'bold': True}})
+            elif sheet_type == 'expenses':
+                # 计算最后一行的行号
+                last_row = len(data_rows) + 2  # 空行+表头+数据行数
+                # 设置Amount列(D列)总和
+                worksheet.update_cell(1, 4, f'=SUM(D3:D{last_row})')
+                # 设置总和单元格格式为加粗
+                worksheet.format('D1', {'textFormat': {'bold': True}})
+            
+            logger.info(f"✅ 表格 {sheet_type} 格式已修复")
+            
+        except Exception as e:
+            logger.error(f"修复表格 {sheet_type} 格式失败: {e}")
     
     def _ensure_worksheets_exist(self):
         """确保所有必需的工作表存在"""
@@ -151,17 +254,66 @@ class GoogleSheetsManager:
                 
                 # 添加表头
                 if sheet_key == 'sales':
+                    # 先添加一个空行
+                    worksheet.append_row([''] * len(SALES_HEADERS))
+                    # 添加表头行
                     worksheet.append_row(SALES_HEADERS)
+                    # 设置表头格式为加粗
+                    worksheet.format('A2:L2', {'textFormat': {'bold': True}})
+                    # 添加金额求和公式 - 在Amount列和Comm Amount列
+                    try:
+                        # 设置Amount列(E列)总和公式 - 在表格底部添加
+                        worksheet.update_cell(1, 5, '=SUM(E3:E1000)')  # E1单元格显示金额总和
+                        # 设置Comm Amount列(K列)总和公式
+                        worksheet.update_cell(1, 11, '=SUM(K3:K1000)')  # K1单元格显示佣金总和
+                        # 设置总和单元格格式为加粗
+                        worksheet.format('E1', {'textFormat': {'bold': True}})
+                        worksheet.format('K1', {'textFormat': {'bold': True}})
+                    except Exception as e:
+                        logger.error(f"设置求和公式失败: {e}")
                 elif sheet_key == 'expenses':
+                    # 先添加一个空行
+                    worksheet.append_row([''] * len(EXPENSES_HEADERS))
+                    # 添加表头行
                     worksheet.append_row(EXPENSES_HEADERS)
+                    # 设置表头格式为加粗
+                    worksheet.format('A2:G2', {'textFormat': {'bold': True}})
+                    # 添加金额求和公式 - 在Amount列
+                    try:
+                        # 设置Amount列(D列)总和公式
+                        worksheet.update_cell(1, 4, '=SUM(D3:D1000)')  # D1单元格显示金额总和
+                        # 设置总和单元格格式为加粗
+                        worksheet.format('D1', {'textFormat': {'bold': True}})
+                    except Exception as e:
+                        logger.error(f"设置求和公式失败: {e}")
                 elif sheet_key == 'agents':
+                    # 先添加一个空行
+                    worksheet.append_row([''] * len(AGENTS_HEADERS))
+                    # 添加表头行
                     worksheet.append_row(AGENTS_HEADERS)
+                    # 设置表头格式为加粗
+                    worksheet.format('A2:F2', {'textFormat': {'bold': True}})
                 elif sheet_key == 'suppliers':
+                    # 先添加一个空行
+                    worksheet.append_row([''] * len(SUPPLIERS_HEADERS))
+                    # 添加表头行
                     worksheet.append_row(SUPPLIERS_HEADERS)
+                    # 设置表头格式为加粗
+                    worksheet.format('A2:F2', {'textFormat': {'bold': True}})
                 elif sheet_key == 'workers':
+                    # 先添加一个空行
+                    worksheet.append_row([''] * len(WORKERS_HEADERS))
+                    # 添加表头行
                     worksheet.append_row(WORKERS_HEADERS)
+                    # 设置表头格式为加粗
+                    worksheet.format('A2:F2', {'textFormat': {'bold': True}})
                 elif sheet_key == 'pic':
+                    # 先添加一个空行
+                    worksheet.append_row([''] * len(PICS_HEADERS))
+                    # 添加表头行
                     worksheet.append_row(PICS_HEADERS)
+                    # 设置表头格式为加粗
+                    worksheet.format('A2:F2', {'textFormat': {'bold': True}})
                 
                 logger.info(f"✅ 创建工作表: {sheet_name}")
     
@@ -210,7 +362,33 @@ class GoogleSheetsManager:
                 data.get('invoice_pdf', '')      # Invoice PDF
             ]
             
-            worksheet.append_row(row_data)
+            # 获取现有数据行数
+            try:
+                # 考虑到我们现在有表头上方空行,表头在第2行,数据从第3行开始
+                all_values = worksheet.get_all_values()
+                next_row = len(all_values) + 1
+                
+                # 确保至少从第3行开始(如果表格为空)
+                if next_row < 3:
+                    next_row = 3
+                
+                # 添加数据到下一行
+                worksheet.append_row(row_data)
+                
+                # 重新计算总和
+                try:
+                    # 更新Amount列总和
+                    worksheet.update_cell(1, 5, f'=SUM(E3:E{next_row})')
+                    # 更新Comm Amount列总和
+                    worksheet.update_cell(1, 11, f'=SUM(K3:K{next_row})')
+                except Exception as e:
+                    logger.error(f"更新总和公式失败: {e}")
+                
+            except Exception as e:
+                logger.error(f"获取行数失败,使用默认append_row: {e}")
+                # 如果获取行数失败,使用默认的append_row
+                worksheet.append_row(row_data)
+            
             logger.info(f"✅ 销售记录添加成功: {data.get('amount')}")
             return True
             
@@ -227,12 +405,12 @@ class GoogleSheetsManager:
             
             # 获取所有数据（包括表头）
             all_values = worksheet.get_all_values()
-            if not all_values or len(all_values) <= 1:  # 没有数据或只有表头
+            if not all_values or len(all_values) <= 2:  # 没有数据或只有空行和表头
                 return []
             
-            # 获取表头和数据
-            headers = all_values[0]
-            data_rows = all_values[1:]
+            # 获取表头和数据 - 考虑空行: 表头在第2行(索引1),数据从第3行开始(索引2)
+            headers = all_values[1]  # 第2行是表头
+            data_rows = all_values[2:]  # 从第3行开始是数据
             
             # 处理记录
             formatted_records = []
@@ -314,7 +492,31 @@ class GoogleSheetsManager:
                 data.get('receipt', '')  # 添加收据链接字段
             ]
             
-            worksheet.append_row(row_data)
+            # 获取现有数据行数
+            try:
+                # 考虑到我们现在有表头上方空行,表头在第2行,数据从第3行开始
+                all_values = worksheet.get_all_values()
+                next_row = len(all_values) + 1
+                
+                # 确保至少从第3行开始(如果表格为空)
+                if next_row < 3:
+                    next_row = 3
+                
+                # 添加数据到下一行
+                worksheet.append_row(row_data)
+                
+                # 重新计算总和
+                try:
+                    # 更新Amount列(D列)总和
+                    worksheet.update_cell(1, 4, f'=SUM(D3:D{next_row})')
+                except Exception as e:
+                    logger.error(f"更新总和公式失败: {e}")
+                
+            except Exception as e:
+                logger.error(f"获取行数失败,使用默认append_row: {e}")
+                # 如果获取行数失败,使用默认的append_row
+                worksheet.append_row(row_data)
+            
             logger.info(f"✅ 费用记录添加成功: {data.get('amount')}")
             return True
             
@@ -331,12 +533,12 @@ class GoogleSheetsManager:
             
             # 获取所有数据（包括表头）
             all_values = worksheet.get_all_values()
-            if not all_values or len(all_values) <= 1:  # 没有数据或只有表头
+            if not all_values or len(all_values) <= 2:  # 没有数据或只有空行和表头
                 return []
             
-            # 获取表头和数据
-            headers = all_values[0]
-            data_rows = all_values[1:]
+            # 获取表头和数据 - 考虑空行: 表头在第2行(索引1),数据从第3行开始(索引2)
+            headers = all_values[1]  # 第2行是表头
+            data_rows = all_values[2:]  # 从第3行开始是数据
             
             # 处理记录
             formatted_records = []
