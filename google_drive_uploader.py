@@ -121,31 +121,28 @@ class GoogleDriveUploader:
             raise
     
     def _get_folder_id(self, expense_type: str) -> Optional[str]:
-        """
-        根据费用类型获取对应的文件夹ID
-        
-        Args:
-            expense_type: 费用类型
-            
-        Returns:
-            文件夹ID或None
-        """
-        # 添加日志，帮助调试
+        """根据费用类型获取对应的文件夹ID"""
         logger.info(f"获取文件夹ID，费用类型: {expense_type}")
         
-        # 首先尝试从映射中获取
+        # 1. 优先处理发票PDF专用文件夹
+        if expense_type == "invoice_pdf":
+            folder_id = os.getenv('DRIVE_FOLDER_INVOICE_PDF')
+            logger.info(f"发票PDF专用文件夹ID: {folder_id}")
+            return folder_id
+        
+        # 2. 处理其他费用类型
         folder_type = self.EXPENSE_TYPE_MAPPING.get(expense_type, expense_type)
         folder_id = self.FOLDER_IDS.get(folder_type)
         
-        # 特殊处理 WiFi Bill
+        # 3. 特殊处理 WiFi Bill
         if expense_type == "WiFi Bill" and not folder_id:
             folder_id = self.FOLDER_IDS.get("wifi")
             logger.info(f"特殊处理 WiFi Bill，获取wifi文件夹ID: {folder_id}")
         
-        # 如果没有找到，尝试从环境变量获取默认文件夹ID
+        # 4. 如果没有找到，尝试从环境变量获取默认文件夹ID
         if not folder_id:
             folder_id = os.getenv('GOOGLE_DRIVE_FOLDER_ID')
-            
+        
         logger.info(f"最终使用的文件夹ID: {folder_id}")
         return folder_id
     
