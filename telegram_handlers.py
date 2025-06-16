@@ -2630,3 +2630,170 @@ async def sales_invoice_pdf_handler(update: Update, context: ContextTypes.DEFAUL
         logger.exception("[UPLOAD] 上传发票PDF失败")
         await update.message.reply_text("❌ 上传出错，请稍后重试")
         return SALES_INVOICE_PDF
+
+# ====================================
+# PDF测试功能区 - 测试PDF上传功能
+# ====================================
+
+async def test_pdf_upload_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """处理 /PDF 命令 - 测试PDF上传功能"""
+    await update.message.reply_text(
+        "📄 <b>PDF上传测试</b>\n\n请上传一个PDF文件进行测试。",
+        parse_mode=ParseMode.HTML
+    )
+
+async def pdf_upload_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """处理PDF测试上传"""
+    try:
+        if not update.message.document:
+            await update.message.reply_text("⚠️ 请上传PDF文档")
+            return
+
+        document = update.message.document
+        file_id = document.file_id
+        file_name = document.file_name or f"test_pdf_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+
+        # ✅ 确认 MIME 类型
+        if not file_name.lower().endswith('.pdf'):
+            await update.message.reply_text("⚠️ 请上传 PDF 文件（扩展名为 .pdf）")
+            return
+
+        # ✅ 获取 Telegram 文件对象
+        file = await context.bot.get_file(file_id)
+        logger.info(f"[TEST PDF] 准备下载 Telegram 文件: file_id={file_id}, file_name={file_name}")
+
+        # ✅ 下载文件为 BytesIO
+        file_stream = io.BytesIO()
+        await file.download_to_memory(out=file_stream)
+        file_stream.seek(0)
+        logger.info(f"[TEST PDF] 下载完成，大小: {file_stream.getbuffer().nbytes} bytes")
+
+        # ✅ 上传到 Google Drive (使用同步包装器)
+        await update.message.reply_text("📤 开始上传到Google Drive，请稍候...")
+        
+        # 使用run_in_executor进行同步操作包装
+        from google_drive_uploader import drive_uploader
+        import asyncio
+        
+        loop = asyncio.get_event_loop()
+        # 使用run_in_executor执行同步的upload_receipt方法
+        result = await loop.run_in_executor(
+            None, 
+            lambda: drive_uploader.upload_receipt(file_stream, "invoice_pdf", mime_type="application/pdf")
+        )
+        
+        logger.info(f"[TEST PDF] 上传结果: {result}")
+
+        if result:
+            # 获取公共链接
+            if isinstance(result, dict) and 'public_link' in result:
+                public_link = result['public_link']
+            else:
+                public_link = result
+
+            # 成功消息
+            success_message = f"""
+✅ <b>PDF上传测试成功!</b>
+
+📄 <b>文件名:</b> {file_name}
+📊 <b>文件大小:</b> {file_stream.getbuffer().nbytes} bytes
+🔗 <b>访问链接:</b> <a href="{public_link}">点击查看PDF</a>
+            """
+            
+            await update.message.reply_html(success_message)
+        else:
+            await update.message.reply_text("❌ PDF上传失败（返回结果为空）")
+
+    except Exception as e:
+        logger.exception("[TEST PDF] 上传PDF失败")
+        await update.message.reply_text(f"❌ 上传出错: {str(e)}\n\n请检查日志获取详细信息。")
+
+async def sales_list_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """查看销售记录"""
+    query = update.callback_query
+    await query.answer()
+    
+    try:
+        sheets_manager = SheetsManager()
+        sales_records = sheets_manager.get_sales_records()
+        
+        # 只显示最近10条记录
+        sales_records = sales_records[-10:] if len(sales_records) > 10 else sales_records
+        
+        if not sales_records:
+            message = "📋 <b>No sales records found</b>"
+        else:
+            message = "📋 <b>RECENT SALES RECORDS</b>\n\n"
+            for record in sales_records:
+                message += f"📅 <b>Date:</b> {record['date']}\n"
+                message += f"👤 <b>PIC:</b> {record['person']}\n"
+                message += f"💰 <b>Amount:</b> RM{record['amount']:,.2f}\n"
+                message += f"🏢 <b>Type:</b> {record.get('type', '')}\n"
+                
+                if record.get('agent_name'):
+                    message += f"🧑‍💼 <b>Agent:</b> {record['agent_name']}\n"
+                    if record.get('agent_ic'):
+                        message += f"🪪 <b>IC:</b> {record['agent_ic']}\n"
+                
+                message += f"💵 <b>Commission:</b> RM{record['commission']:,.2f}\n"
+                
+                # 添加PDF链接信息
+                if record.get('invoice_pdf'):
+                    message += f"📄 <b>Invoice PDF:</b> Available\n"
+                    
+                message += "-------------------------\n\n"
+        
+        keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="back_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            message,
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+        
+    except Exception as e:
+        logger.error(f"获取销售记录失败: {e}")
+        await query.edit_message_text("❌ Failed to retrieve records. Please try again.",
+                                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="back_main")]]))
+        return ConversationHandler.END
+
+# ====================================
+# 处理器注册 - 应用程序配置
+# ====================================
+
+def setup_handlers(application):
+    """设置所有处理器"""
+    # 获取对话处理器
+    conversation_handlers = get_conversation_handlers()
+    
+    # 主菜单对话处理器
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CallbackQueryHandler(start_command, pattern="^main_menu$"))
+    application.add_handler(CallbackQueryHandler(callback_query_handler, pattern="^back_main$"))
+
+    # PDF测试处理器
+    application.add_handler(CommandHandler("PDF", test_pdf_upload_command))
+    application.add_handler(MessageHandler(filters.Document.PDF, pdf_upload_handler))
+    
+    # 添加对话处理器
+    for handler in conversation_handlers:
+        application.add_handler(handler)
+    
+    # 基础命令处理器
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("cancel", cancel_command))
+    
+    # 回调查询处理器 (放在会话处理器之后)
+    application.add_handler(CallbackQueryHandler(callback_query_handler))
+    
+    # 文本消息处理器
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_message_handler))
+    
+    # 未知命令处理器
+    application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
+    
+    # 错误处理器
+    application.add_error_handler(error_handler)
+    
+    logger.info("所有处理器已成功注册")
