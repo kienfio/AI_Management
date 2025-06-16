@@ -2657,13 +2657,17 @@ async def sales_invoice_pdf_handler(update: Update, context: ContextTypes.DEFAUL
                 if not hasattr(drive_uploader, 'drive_service') or drive_uploader.drive_service is None:
                     raise Exception("Drive上传器未初始化")
                 
-                # 上传文件
-                result = await drive_uploader.upload_receipt(file_stream, "invoice_pdf", 'application/pdf')
+                # 明确指定上传到发票PDF专用文件夹
+                result = drive_uploader.upload_receipt(
+                    file_stream, 
+                    "invoice_pdf",  # 明确指定类型
+                    'application/pdf'
+                )
                 
                 if result:
                     # 保存PDF链接到用户数据
                     context.user_data['sales_invoice_pdf'] = result
-                    logger.info(f"PDF上传成功，链接: {result}")
+                    logger.info(f"PDF上传成功，链接: {result['public_link']}")
                     
                     # 更新处理中的消息
                     success_message = await update.message.reply_text("✅ 发票PDF已上传成功")
@@ -2683,13 +2687,13 @@ async def sales_invoice_pdf_handler(update: Update, context: ContextTypes.DEFAUL
             except Exception as e:
                 logger.error(f"主要上传方法失败: {e}")
                 
-                # 尝试备用上传方法
+                                    # 尝试备用上传方法
                 try:
                     from google_sheets import GoogleSheetsManager
                     sheets_manager = GoogleSheetsManager()
                     
                     file_stream.seek(0)
-                    backup_result = await sheets_manager.upload_receipt_to_drive(
+                    backup_result = sheets_manager.upload_receipt_to_drive(
                         file_stream,
                         file_name,
                         'application/pdf',
