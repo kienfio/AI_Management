@@ -186,7 +186,8 @@ class GoogleSheetsManager:
             
             # 准备数据行
             # 将佣金率转换为百分比格式
-            commission_rate = data.get('commission_rate', 0)
+            # 支持新旧两种键名(commission_rate和comm_rate)
+            commission_rate = data.get('commission_rate', data.get('comm_rate', 0))
             commission_rate_display = f"{commission_rate * 100}%" if commission_rate else "0%"
             
             # 处理日期格式，只保留日期部分
@@ -205,7 +206,7 @@ class GoogleSheetsManager:
                 data.get('agent_name', ''),      # Agent Name
                 data.get('agent_ic', ''),        # IC
                 commission_rate_display,         # Comm Rate
-                data.get('commission_amount', 0), # Comm Amount
+                data.get('commission_amount', data.get('comm_amount', 0)), # Comm Amount - 支持新旧两种键名
                 data.get('invoice_pdf', '')      # Invoice PDF
             ]
             
