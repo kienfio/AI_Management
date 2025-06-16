@@ -19,12 +19,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# 首先设置环境变量，确保在导入任何模块前完成
-logger.info("设置环境变量...")
-if not os.getenv('DRIVE_FOLDER_INVOICE_PDF'):
-    os.environ['DRIVE_FOLDER_INVOICE_PDF'] = '1msS4CN4byTcZ5awRlfdBJmJ92hf2m2ls'
-    logger.info("已设置DRIVE_FOLDER_INVOICE_PDF环境变量")
-
 # 尝试加载.env文件
 try:
     from dotenv import load_dotenv
@@ -39,6 +33,11 @@ logger.info(f"DRIVE_FOLDER_ELECTRICITY: {os.getenv('DRIVE_FOLDER_ELECTRICITY')}"
 logger.info(f"DRIVE_FOLDER_WATER: {os.getenv('DRIVE_FOLDER_WATER')}")
 logger.info(f"DRIVE_FOLDER_PURCHASING: {os.getenv('DRIVE_FOLDER_PURCHASING')}")
 logger.info(f"DRIVE_FOLDER_WIFI: {os.getenv('DRIVE_FOLDER_WIFI')}")
+
+# 检查必要的环境变量
+if not os.getenv('DRIVE_FOLDER_INVOICE_PDF'):
+    logger.error("未设置 DRIVE_FOLDER_INVOICE_PDF 环境变量")
+    raise ValueError("必须设置 DRIVE_FOLDER_INVOICE_PDF 环境变量")
 
 # 现在导入telegram相关模块
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
