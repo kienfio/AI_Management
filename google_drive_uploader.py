@@ -45,11 +45,11 @@ class GoogleDriveUploader:
     def _initialize_folders(self):
         """初始化文件夹ID映射，确保使用最新的环境变量"""
         self.FOLDER_IDS = {
-            "electricity": os.getenv('DRIVE_FOLDER_ELECTRICITY', "1FXf65K3fY-G4CS49oFr_lxeTltPDrEhh"),  # 电费收据文件夹
-            "water": os.getenv('DRIVE_FOLDER_WATER', "1L2viDKNPbuIX01mnLn5VM2VA_1iIavOh"),             # 水费收据文件夹
-            "Purchasing": os.getenv('DRIVE_FOLDER_PURCHASING', "1kXKGC9bHMeMmFtPPogrvW0xdbVjOjYF8"),    # 购买杂货收据文件夹
-            "wifi": os.getenv('DRIVE_FOLDER_WIFI', "1KjWV4tWHLh1aSM2QcTtfDXXSTbzD1UF4"),                # WiFi收据文件夹
-            "invoice_pdf": os.getenv('DRIVE_FOLDER_INVOICE_PDF', "1msS4CN4byTcZ5awRlfdBJmJ92hf2m2ls")   # 发票PDF文件夹
+            "electricity": os.getenv('DRIVE_FOLDER_ELECTRICITY'),  # 电费收据文件夹
+            "water": os.getenv('DRIVE_FOLDER_WATER'),             # 水费收据文件夹
+            "Purchasing": os.getenv('DRIVE_FOLDER_PURCHASING'),    # 购买杂货收据文件夹
+            "wifi": os.getenv('DRIVE_FOLDER_WIFI'),                # WiFi收据文件夹
+            "invoice_pdf": os.getenv('DRIVE_FOLDER_INVOICE_PDF')   # 发票PDF文件夹
         }
         logger.info(f"已初始化文件夹ID映射: {self.FOLDER_IDS}")
     
@@ -245,22 +245,12 @@ class GoogleDriveUploader:
                 elif receipt_type_or_name == "WiFi Bill":
                     folder_id = self.FOLDER_IDS.get("wifi")
                     logger.info(f"WiFi Bill特殊处理，直接获取wifi文件夹ID: {folder_id}")
-                    if not folder_id:
-                        folder_id = "1KjWV4tWHLh1aSM2QcTtfDXXSTbzD1UF4"  # 使用硬编码的ID作为备份
-                        logger.info(f"使用硬编码的WiFi文件夹ID: {folder_id}")
                 elif receipt_type_or_name == "invoice_pdf":
                     folder_id = self.FOLDER_IDS.get("invoice_pdf")
                     logger.info(f"Invoice PDF特殊处理，直接获取invoice_pdf文件夹ID: {folder_id}")
-                    # 如果环境变量中没有设置,则先尝试从系统环境变量获取
                     if not folder_id:
-                        env_folder_id = os.getenv('DRIVE_FOLDER_INVOICE_PDF')
-                        if env_folder_id:
-                            folder_id = env_folder_id
-                            logger.info(f"从环境变量获取PDF文件夹ID: {folder_id}")
-                        else:
-                            folder_id = "1msS4CN4byTcZ5awRlfdBJmJ92hf2m2ls"  # 使用硬编码的ID作为备份
-                            logger.info(f"使用硬编码的Invoice PDF文件夹ID: {folder_id}")
-                    # 验证文件夹ID是否有效
+                        folder_id = os.getenv('DRIVE_FOLDER_INVOICE_PDF')
+                        logger.info(f"从环境变量获取PDF文件夹ID: {folder_id}")
                     logger.info(f"最终使用的Invoice PDF文件夹ID: {folder_id}")
                 else:
                     folder_id = self._get_folder_id(receipt_type_or_name)
