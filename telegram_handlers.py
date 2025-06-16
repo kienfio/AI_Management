@@ -2639,12 +2639,24 @@ async def sales_invoice_pdf_handler(update: Update, context: ContextTypes.DEFAUL
                 logger.error("Google Drive上传器未初始化")
                 await update.message.reply_text("❌ Google Drive服务未初始化，请稍后再试")
                 return SALES_INVOICE_PDF
+            
+            # 重新初始化一次,确保文件夹ID是最新的
+            drive_uploader.reinitialize()
                 
             logger.info("开始上传PDF到Google Drive...")
-            logger.info(f"PDF文件夹ID: {drive_uploader.FOLDER_IDS.get('invoice_pdf')}")
+            pdf_folder_id = drive_uploader.FOLDER_IDS.get('invoice_pdf')
+            logger.info(f"PDF文件夹ID: {pdf_folder_id}")
+            
+            # 如果没有找到文件夹ID,使用默认ID
+            if not pdf_folder_id:
+                pdf_folder_id = "1msS4CN4byTcZ5awRlfdBJmJ92hf2m2ls"  # 使用硬编码的ID作为备份
+                logger.info(f"未找到PDF文件夹ID,使用默认ID: {pdf_folder_id}")
             
             # 确保使用正确的MIME类型
             mime_type = document.mime_type if document.mime_type else 'application/pdf'
+            # 确保PDF文件使用正确的MIME类型
+            if file_name.lower().endswith('.pdf') and mime_type != 'application/pdf':
+                mime_type = 'application/pdf'
             logger.info(f"使用MIME类型: {mime_type}")
             
             # 确保文件流指针在开头
@@ -2652,6 +2664,8 @@ async def sales_invoice_pdf_handler(update: Update, context: ContextTypes.DEFAUL
             logger.info("已重置文件流指针位置")
             
             # 执行上传
+            # 确保正确传递参数,明确指定"invoice_pdf"作为receipt_type和正确的MIME类型
+            logger.info(f"准备上传PDF,MIME类型: {mime_type}, 文件夹类型: invoice_pdf")
             result = drive_uploader.upload_receipt(file_stream, "invoice_pdf", mime_type)
             logger.info(f"上传结果: {result}")
             
@@ -2671,7 +2685,17 @@ async def sales_invoice_pdf_handler(update: Update, context: ContextTypes.DEFAUL
                 await update.message.reply_text("❌ 发票PDF上传失败")
                 context.user_data['sales_invoice_pdf'] = None
         except Exception as e:
+            # 记录详细的错误信息
             logger.error(f"上传发票PDF失败: {e}", exc_info=True)  # 记录完整堆栈信息
+            logger.error(f"失败详情 - MIME类型: {mime_type}, 文件名: {file_name}")
+            
+            # 检查drive_uploader状态
+            try:
+                logger.error(f"上传器文件夹ID: {drive_uploader.FOLDER_IDS}")
+                logger.error(f"上传器服务状态: {'已初始化' if drive_uploader.drive_service else '未初始化'}")
+            except:
+                logger.error("无法获取上传器状态信息")
+                
             await update.message.reply_text("❌ 发票PDF上传失败，请稍后再试")
             context.user_data['sales_invoice_pdf'] = None
         
