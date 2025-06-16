@@ -26,13 +26,13 @@ def test_pdf_upload():
     try:
         # 测试1: 使用文件路径上传
         logger.info("测试1: 通过文件路径上传")
-        result = uploader.upload_receipt(test_pdf, "invoice_pdf")
+       result = uploader.upload_receipt(test_pdf, "invoice_pdf", mime_type="application/pdf")
         logger.info(f"测试1结果: {result}")
         
         # 测试2: 使用文件流上传
         logger.info("测试2: 通过文件流上传")
         with open(test_pdf, 'rb') as f:
-            result = uploader.upload_receipt(f, "invoice_pdf")
+            result = uploader.upload_receipt(f, "invoice_pdf", mime_type="application/pdf")
             logger.info(f"测试2结果: {result}")
         
         return True
