@@ -1107,14 +1107,13 @@ async def cost_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             # 获取正确初始化的drive_uploader实例
             drive_uploader = get_drive_uploader()
             
-            # 上传文件
-            mime_type = file.mime_type if hasattr(file, 'mime_type') else 'image/jpeg'
-            logger.info(f"使用MIME类型: {mime_type}, 费用类型: {cost_type}")
+            # 上传文件 (使用自动检测MIME类型)
+            logger.info(f"上传收据，费用类型: {cost_type}, 文件名: {file_name}")
             
+            # 不显式指定mime_type，让系统自动检测
             receipt_result = drive_uploader.upload_receipt(
                 file_stream, 
-                cost_type,  # 传递费用类型
-                mime_type
+                cost_type  # 传递费用类型
             )
             
             if receipt_result:
@@ -2614,10 +2613,11 @@ async def sales_invoice_pdf_handler(update: Update, context: ContextTypes.DEFAUL
         file_stream.seek(0)
         logger.info(f"[UPLOAD] 下载完成，大小: {file_stream.getbuffer().nbytes} bytes")
 
-        # ✅ 上传到 Google Drive
+        # ✅ 上传到 Google Drive (使用自动检测MIME类型)
         from google_drive_uploader import drive_uploader
 
-        result = drive_uploader.upload_receipt(file_stream, "invoice_pdf", mime_type="application/pdf")
+        # 将文件名传给upload_receipt函数，不显式指定mime_type，让它自动检测
+        result = drive_uploader.upload_receipt(file_stream, "invoice_pdf")
         logger.info(f"[UPLOAD] 上传结果: {result}")
 
         if result:
