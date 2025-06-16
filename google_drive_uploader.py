@@ -195,8 +195,12 @@ class GoogleDriveUploader:
             dict: 包含文件ID和公开链接的字典，或者直接返回公开链接字符串(兼容旧代码)
         """
         try:
+            # 强制记录日志
+            logger.info(f"⏫ 开始上传文件 | 类型: {receipt_type_or_name} | MIME: {mime_type}")
+            
             # 添加PDF专用上传逻辑
             if receipt_type_or_name == "invoice_pdf":
+                logger.info("🔄 使用PDF专用上传逻辑")
                 return self._upload_invoice_pdf(file_path_or_stream, mime_type)
             
             # 如果未传入 mime_type，则自动检测
@@ -271,6 +275,9 @@ class GoogleDriveUploader:
                 # 添加类型映射日志
                 logger.info(f"上传类型: {receipt_type_or_name}, 映射后类型: {drive_folder_type or receipt_type_or_name}")
             
+            # 添加文件夹ID调试
+            logger.info(f"📁 使用的文件夹ID: {folder_id}")
+            
             # 创建文件元数据
             file_metadata = {
                 'name': file_name,
@@ -330,8 +337,9 @@ class GoogleDriveUploader:
             }
             
         except Exception as e:
-            logger.error(f"上传文件失败: {e}", exc_info=True)  # 记录完整异常信息
-            logger.error(f"上传参数: 类型={receipt_type_or_name}, MIME={mime_type}, 文件名={file_name if 'file_name' in locals() else '未知'}")
+            # 详细记录异常
+            logger.exception(f"🔥 文件上传严重失败: {str(e)}")
+            logger.error(f"📂 上传参数: type={receipt_type_or_name}, mime={mime_type}")
             
             # 如果是HTTP错误，记录响应内容
             if hasattr(e, 'content'):
@@ -452,8 +460,13 @@ def get_drive_uploader():
     """获取或创建GoogleDriveUploader实例"""
     global drive_uploader
     if drive_uploader is None:
+        logger.info("🔄 正在初始化Google Drive上传器...")
         drive_uploader = GoogleDriveUploader()
-        logger.info("已创建GoogleDriveUploader实例")
+        # 强制初始化服务
+        drive_uploader._initialize_service()
+        logger.info("✅ Google Drive上传器初始化完成")
+    else:
+        logger.info("♻️ 使用已存在的Google Drive上传器实例")
     return drive_uploader
 
 # 示例用法
