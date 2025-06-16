@@ -38,6 +38,7 @@ print("正在检查环境变量...")
 print(f"GOOGLE_CREDENTIALS_BASE64: {'✅ 已设置' if os.getenv('GOOGLE_CREDENTIALS_BASE64') else '❌ 未设置'}")
 print(f"GOOGLE_SHEET_ID: {'✅ 已设置' if os.getenv('GOOGLE_SHEET_ID') else '❌ 未设置'}")
 print(f"TELEGRAM_TOKEN: {'✅ 已设置' if os.getenv('TELEGRAM_TOKEN') else '❌ 未设置'}")
+print(f"DRIVE_FOLDER_INVOICE_PDF: {'✅ 已设置' if os.getenv('DRIVE_FOLDER_INVOICE_PDF') else '❌ 未设置'}")
 
 # Telegram Bot 配置
 BOT_TOKEN = os.getenv('TELEGRAM_TOKEN')
