@@ -70,6 +70,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 💵 *Coasting* - 记录各项支出
 📈 *Report* - 查看统计报告
 ⚙️ *Setting* - 创建代理商/供应商
+
+📄 *可用命令：*
+/PDF - 测试PDF上传功能
+/Setting - 创建代理商/供应商
+/help - 显示帮助信息
     """
     
     # 检查是通过回调查询还是直接命令调用
@@ -116,6 +121,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 • 当月报表查看
 • 指定月份查询
 • 收支汇总统计
+
+📄 *PDF上传测试*
+• 使用 /PDF 命令
+• 上传PDF文件测试
+• 查看上传结果和链接
 
 💡 *操作提示*
 • 使用按钮进行所有操作
