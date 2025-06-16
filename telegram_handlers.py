@@ -1106,6 +1106,7 @@ async def cost_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         
         # 获取文件对象
         file = await context.bot.get_file(file_id)
+        logger.info(f"获取文件成功: {file.file_path}")
         
         # 下载文件内容
         file_stream = io.BytesIO()
@@ -1140,9 +1141,12 @@ async def cost_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         # 检测是否为PDF文件
         is_pdf = False
         mime_type = file.mime_type if hasattr(file, 'mime_type') else 'image/jpeg'
-        if mime_type == 'application/pdf' or (hasattr(file, 'file_name') and file.file_name.lower().endswith('.pdf')):
+        if mime_type == 'application/pdf' or (hasattr(file, 'file_name') and file.file_name and file.file_name.lower().endswith('.pdf')):
             is_pdf = True
             logger.info("检测到PDF文件")
+        
+        # 发送处理中的消息
+        processing_message = await update.message.reply_text("⏳ 正在处理文件，请稍候...")
         
         # 直接使用GoogleDriveUploader上传文件
         try:
@@ -1150,6 +1154,7 @@ async def cost_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             
             # 获取正确初始化的drive_uploader实例
             drive_uploader = get_drive_uploader()
+            logger.info(f"Google Drive上传器已初始化: {drive_uploader is not None}")
             
             # 上传文件
             logger.info(f"使用MIME类型: {mime_type}, 文件夹类型: {drive_folder_type}")
@@ -1175,19 +1180,21 @@ async def cost_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 if isinstance(receipt_result, dict):
                     public_link = receipt_result.get('public_link', '')
                     context.user_data['cost_receipt'] = receipt_result
+                    await processing_message.delete()
                     await update.message.reply_text(f"✅ 收据已上传成功")
                     logger.info(f"收据上传成功，链接: {public_link}")
                 else:
                     # 如果是字符串，直接使用
                     context.user_data['cost_receipt'] = receipt_result
+                    await processing_message.delete()
                     await update.message.reply_text(f"✅ 收据已上传成功")
                     logger.info(f"收据上传成功，链接: {receipt_result}")
             else:
                 logger.error("上传结果为空")
-                await update.message.reply_text("❌ 收据上传失败")
+                await processing_message.edit_text("❌ 收据上传失败")
                 context.user_data['cost_receipt'] = None
         except Exception as e:
-            logger.error(f"上传收据失败: {e}")
+            logger.error(f"上传收据失败: {e}", exc_info=True)
             await update.message.reply_text("❌ 收据上传失败，请稍后再试")
             context.user_data['cost_receipt'] = None
         
@@ -1195,7 +1202,7 @@ async def cost_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         return await show_cost_confirmation(update, context)
         
     except Exception as e:
-        logger.error(f"处理收据时出错: {e}")
+        logger.error(f"处理收据时出错: {e}", exc_info=True)
         await update.message.reply_text("❌ 处理收据时出错，请重试")
         return COST_RECEIPT
 
@@ -2646,62 +2653,90 @@ async def sales_invoice_pdf_handler(update: Update, context: ContextTypes.DEFAUL
     try:
         logger.info("开始处理PDF上传...")
         
-        # 检查是否是PDF文件
+        # 确保只处理文档消息（移除不必要的条件判断）
         if not update.message.document:
-            logger.warning("未接收到文档文件")
-            await update.message.reply_text("⚠️ 请上传PDF文档")
-            return SALES_INVOICE_PDF
-        
-        document = update.message.document
+            logger.warning("未接收到文档文件，但继续尝试处理")
+            
+        # 获取文档对象（即使不是PDF也尝试处理）
+        document = update.message.document or update.message.effective_attachment
         file_id = document.file_id
         file_name = document.file_name or f"invoice_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
         
-        logger.info(f"接收到文件: {file_name}, ID: {file_id}, MIME类型: {document.mime_type}")
+        logger.info(f"开始处理文件上传: {file_name}")  # 确保日志输出
+        
+        # 强制初始化Google Drive上传器
+        from google_drive_uploader import get_drive_uploader
+        drive_uploader = get_drive_uploader()
+        logger.info(f"Google Drive上传器已初始化: {drive_uploader is not None}")
         
         # 获取文件对象
+        file = await context.bot.get_file(file_id)
+        logger.info(f"获取文件成功: {file.file_path}")
+        
+        # 下载文件内容到内存
+        file_stream = io.BytesIO()
+        await file.download_to_memory(out=file_stream)
+        file_stream.seek(0)
+        
+        # 验证文件内容
+        file_content = file_stream.read()
+        if len(file_content) == 0:
+            raise Exception("下载的文件内容为空")
+        
+        file_stream.seek(0)
+        logger.info(f"文件内容下载成功,大小: {len(file_content)} 字节")
+        
+        # 发送处理中的消息
+        processing_message = await update.message.reply_text("⏳ 正在处理PDF文件，请稍候...")
+        
+        # 尝试上传到Google Drive
         try:
-            file = await context.bot.get_file(file_id)
-            logger.info(f"获取文件成功: {file.file_path}")
+            # 直接调用上传方法
+            result = drive_uploader.upload_receipt(
+                file_stream,
+                "invoice_pdf",
+                'application/pdf'
+            )
             
-            # 下载文件内容到内存
-            file_stream = io.BytesIO()
-            await file.download_to_memory(out=file_stream)
-            file_stream.seek(0)
+            if result:
+                # 保存PDF链接到用户数据
+                context.user_data['sales_invoice_pdf'] = result
+                logger.info(f"PDF上传成功，链接: {result['public_link']}")
+                
+                # 更新处理中的消息
+                success_message = await update.message.reply_text("✅ 发票PDF已上传成功")
+                
+                # 等待一秒让用户看到成功消息
+                await asyncio.sleep(1)
+                
+                # 删除处理中和成功消息
+                await processing_message.delete()
+                await success_message.delete()
+                
+                # 继续到确认页面
+                return await show_sales_confirmation(update, context)
+            else:
+                raise Exception("上传结果为空")
+                
+        except Exception as e:
+            logger.error(f"主要上传方法失败: {e}")
             
-            # 验证文件内容
-            file_content = file_stream.read()
-            if len(file_content) == 0:
-                raise Exception("下载的文件内容为空")
-            
-            file_stream.seek(0)
-            logger.info(f"文件内容下载成功,大小: {len(file_content)} 字节")
-            
-            # 发送处理中的消息
-            processing_message = await update.message.reply_text("⏳ 正在处理PDF文件，请稍候...")
-            
-            # 尝试上传到Google Drive
+            # 尝试备用上传方法
             try:
-                from google_drive_uploader import get_drive_uploader
-                drive_uploader = get_drive_uploader()
+                from google_sheets import GoogleSheetsManager
+                sheets_manager = GoogleSheetsManager()
                 
-                # 确保drive_uploader已初始化
-                if not hasattr(drive_uploader, 'drive_service') or drive_uploader.drive_service is None:
-                    raise Exception("Drive上传器未初始化")
-                
-                # 明确指定上传到发票PDF专用文件夹
-                result = drive_uploader.upload_receipt(
-                    file_stream, 
-                    "invoice_pdf",  # 明确指定类型
-                    'application/pdf'
+                file_stream.seek(0)
+                backup_result = sheets_manager.upload_receipt_to_drive(
+                    file_stream,
+                    file_name,
+                    'application/pdf',
+                    'invoice_pdf'
                 )
                 
-                if result:
-                    # 保存PDF链接到用户数据
-                    context.user_data['sales_invoice_pdf'] = result
-                    logger.info(f"PDF上传成功，链接: {result['public_link']}")
-                    
-                    # 更新处理中的消息
-                    success_message = await update.message.reply_text("✅ 发票PDF已上传成功")
+                if backup_result:
+                    context.user_data['sales_invoice_pdf'] = backup_result
+                    success_message = await update.message.reply_text("✅ 发票PDF已上传成功(备用方法)")
                     
                     # 等待一秒让用户看到成功消息
                     await asyncio.sleep(1)
@@ -2710,55 +2745,18 @@ async def sales_invoice_pdf_handler(update: Update, context: ContextTypes.DEFAUL
                     await processing_message.delete()
                     await success_message.delete()
                     
-                    # 继续到确认页面
                     return await show_sales_confirmation(update, context)
                 else:
-                    raise Exception("上传结果为空")
+                    raise Exception("备用上传失败")
                     
-            except Exception as e:
-                logger.error(f"主要上传方法失败: {e}")
+            except Exception as backup_err:
+                logger.error(f"备用上传方法也失败了: {backup_err}")
+                await processing_message.edit_text(
+                    "❌ 发票PDF上传失败\n\n可能原因:\n1. 文件格式不兼容\n2. 网络连接问题\n3. 服务器暂时不可用\n\n请稍后再试"
+                )
+                context.user_data['sales_invoice_pdf'] = None
+                return SALES_INVOICE_PDF
                 
-                                    # 尝试备用上传方法
-                try:
-                    from google_sheets import GoogleSheetsManager
-                    sheets_manager = GoogleSheetsManager()
-                    
-                    file_stream.seek(0)
-                    backup_result = sheets_manager.upload_receipt_to_drive(
-                        file_stream,
-                        file_name,
-                        'application/pdf',
-                        'invoice_pdf'
-                    )
-                    
-                    if backup_result:
-                        context.user_data['sales_invoice_pdf'] = backup_result
-                        success_message = await update.message.reply_text("✅ 发票PDF已上传成功(备用方法)")
-                        
-                        # 等待一秒让用户看到成功消息
-                        await asyncio.sleep(1)
-                        
-                        # 删除处理中和成功消息
-                        await processing_message.delete()
-                        await success_message.delete()
-                        
-                        return await show_sales_confirmation(update, context)
-                    else:
-                        raise Exception("备用上传失败")
-                        
-                except Exception as backup_err:
-                    logger.error(f"备用上传方法也失败了: {backup_err}")
-                    await processing_message.edit_text(
-                        "❌ 发票PDF上传失败\n\n可能原因:\n1. 文件格式不兼容\n2. 网络连接问题\n3. 服务器暂时不可用\n\n请稍后再试"
-                    )
-                    context.user_data['sales_invoice_pdf'] = None
-                    return SALES_INVOICE_PDF
-                    
-        except Exception as e:
-            logger.error(f"获取或下载文件失败: {e}")
-            await update.message.reply_text("❌ 获取文件失败，请重试")
-            return SALES_INVOICE_PDF
-            
     except Exception as e:
         logger.error(f"处理发票PDF时出错: {e}", exc_info=True)
         await update.message.reply_text("❌ 处理发票PDF时出错，请重试")
