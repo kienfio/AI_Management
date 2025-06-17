@@ -2834,3 +2834,76 @@ async def sales_invoice_pdf_handler(update: Update, context: ContextTypes.DEFAUL
         logger.error(f"处理发票PDF时出错: {e}", exc_info=True)
         await update.message.reply_text("❌ 处理发票PDF时出错，请重试")
         return SALES_INVOICE_PDF
+
+# 添加工作人员选择处理函数
+async def worker_select_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理工作人员选择"""
+    query = update.callback_query
+    await query.answer()
+    
+    # 从回调数据中提取工作人员名称
+    worker_data = query.data
+    
+    if worker_data.startswith("worker_"):
+        worker_name = worker_data.replace("worker_", "")
+        
+        # 处理自定义工作人员输入
+        if worker_name == "other":
+            keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                "👷 <b>Please enter worker name:</b>",
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
+            )
+            
+            # 设置一个标记，表示我们正在等待自定义工作人员名称输入
+            context.user_data['waiting_for_custom_worker'] = True
+            return COST_WORKER
+        
+        # 正常工作人员选择
+        context.user_data['cost_worker'] = worker_name
+        context.user_data['cost_desc'] = f"Salary for {worker_name}"  # 自动设置描述
+        
+        # 显示金额输入界面
+        keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            f"👷 <b>Worker:</b> {worker_name}\n\n<b>Please enter salary amount:</b>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+        
+        return COST_AMOUNT
+    
+    # 未知回调数据
+    await query.edit_message_text("❌ Unknown operation, please try again.")
+    return ConversationHandler.END
+
+# 添加自定义工作人员名称输入处理
+async def custom_worker_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理自定义工作人员名称输入"""
+    # 检查是否正在等待自定义工作人员输入
+    if not context.user_data.get('waiting_for_custom_worker'):
+        return COST_WORKER
+    
+    # 获取用户输入的工作人员名称
+    worker_name = update.message.text.strip()
+    context.user_data['cost_worker'] = worker_name
+    context.user_data['cost_desc'] = f"Salary for {worker_name}"  # 自动设置描述
+    
+    # 清除等待标记
+    context.user_data.pop('waiting_for_custom_worker', None)
+    
+    # 显示金额输入界面
+    keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_html(
+        f"👷 <b>Worker:</b> {worker_name}\n\n<b>Please enter salary amount:</b>",
+        reply_markup=reply_markup
+    )
+    
+    return COST_AMOUNT
