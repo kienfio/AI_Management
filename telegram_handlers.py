@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 SALES_PERSON, SALES_AMOUNT, SALES_BILL_TO, SALES_CLIENT, SALES_COMMISSION_TYPE, SALES_COMMISSION_PERCENT, SALES_COMMISSION_AMOUNT, SALES_AGENT_SELECT, SALES_CONFIRM, SALES_INVOICE_PDF = range(10)
 
 # 费用管理状态
-COST_TYPE, COST_SUPPLIER, COST_AMOUNT, COST_DESC, COST_RECEIPT, COST_CONFIRM = range(6)
+COST_TYPE, COST_SUPPLIER, COST_AMOUNT, COST_DESC, COST_RECEIPT, COST_CONFIRM, COST_WORKER = range(7)  # 添加 COST_WORKER 状态
 
 # 报表生成状态
 REPORT_TYPE, REPORT_MONTH = range(2)
@@ -926,17 +926,50 @@ async def cost_type_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return COST_TYPE
     
     elif query.data == "cost_salary":
-        # 对于工资支出，直接输入金额
-        keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            "💰 <b>Enter Salary Amount:</b>",
-            parse_mode=ParseMode.HTML,
-            reply_markup=reply_markup
-        )
-        
-        return COST_AMOUNT
+        # 对于工资支出，显示工作人员列表
+        try:
+            # 获取工作人员列表
+            sheets_manager = SheetsManager()
+            workers = sheets_manager.get_workers(active_only=True)
+            
+            # 创建工作人员选择按钮
+            keyboard = []
+            
+            # 从Google表格中获取的工作人员
+            if workers:
+                for worker in workers:
+                    # 使用工作人员名称作为按钮文本
+                    name = worker.get('Name', worker.get('name', ''))
+                    if name:
+                        keyboard.append([InlineKeyboardButton(f"👷 {name}", callback_data=f"worker_{name}")])
+            
+            # 如果没有工作人员，显示一条消息
+            if not keyboard:
+                keyboard.append([InlineKeyboardButton("ℹ️ No workers found", callback_data="no_action")])
+            
+            # 添加自定义输入选项
+            keyboard.append([InlineKeyboardButton("✏️ Other (Custom Input)", callback_data="worker_other")])
+            keyboard.append([InlineKeyboardButton("⚙️ Create Worker", callback_data="setting_create_worker")])
+            
+            # 添加取消按钮
+            keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="back_cost")])
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                "👷 <b>Select Worker:</b>",
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
+            )
+            
+            return COST_WORKER
+            
+        except Exception as e:
+            logger.error(f"获取工作人员列表失败: {e}")
+            await query.edit_message_text(
+                "❌ <b>Failed to get worker data</b>\n\nPlease try again later.",
+                parse_mode=ParseMode.HTML
+            )
+            return ConversationHandler.END
     
     return ConversationHandler.END
 
@@ -1216,6 +1249,7 @@ async def cost_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         cost_type = context.user_data['cost_type']
         amount = context.user_data['cost_amount']
         supplier = context.user_data.get('cost_supplier', '')
+        worker = context.user_data.get('cost_worker', '')
         desc = context.user_data.get('cost_desc', '')
         receipt_link = context.user_data.get('cost_receipt', '')
         
@@ -1230,9 +1264,9 @@ async def cost_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         data = {
             'date': date_str,
             'type': cost_type,
-            'supplier': supplier,
+            'supplier': supplier if cost_type != "Worker Salary" else worker,  # 如果是工资，使用工作人员名称
             'amount': amount,
-            'category': supplier if supplier else 'Other',
+            'category': supplier if supplier else (worker if worker else 'Other'),
             'description': desc,
             'receipt': receipt_link  # 使用Google Drive链接
         }
@@ -1244,8 +1278,11 @@ async def cost_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 📋 <b>Type:</b> {cost_type}
 """
-        if supplier:
+        if cost_type == "Worker Salary" and worker:
+            success_message += f"👷 <b>Worker:</b> {worker}\n"
+        elif supplier:
             success_message += f"🏭 <b>Supplier:</b> {supplier}\n"
+            
         success_message += f"💰 <b>Amount:</b> RM{amount:,.2f}\n"
         
         if receipt_link:
@@ -1350,12 +1387,24 @@ async def show_cost_confirmation(update: Update, context: ContextTypes.DEFAULT_T
             confirm_message += "\n<b>Please confirm the information:</b>"
             
     else:  # Worker Salary
+        worker_name = context.user_data.get('cost_worker', '')
+        desc = context.user_data.get('cost_desc', '')
+        
         confirm_message = f"""
 💵 <b>EXPENSE CONFIRMATION</b>
 
 📋 <b>Type:</b> {cost_type}
-💰 <b>Amount:</b> RM{amount:,.2f}
 """
+        # 如果有工作人员信息，显示工作人员名称
+        if worker_name:
+            confirm_message += f"👷 <b>Worker:</b> {worker_name}\n"
+        
+        # 如果有描述，显示描述
+        if desc and not desc.startswith(f"Salary for {worker_name}"):
+            confirm_message += f"📝 <b>Description:</b> {desc}\n"
+            
+        confirm_message += f"💰 <b>Amount:</b> RM{amount:,.2f}\n"
+        
         if has_receipt:
             confirm_message += "📎 <b>Receipt:</b> Uploaded\n"
             
@@ -1635,6 +1684,24 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
         )
         return SETTING_NAME
     
+    # 从费用录入界面创建工作人员
+    elif query.data == "setting_create_worker":
+        # 保存当前状态，以便稍后恢复
+        if 'cost_type' in context.user_data:
+            context.user_data['previous_state'] = 'cost'
+            
+        # 调用设置函数
+        context.user_data['setting_category'] = 'worker'
+        keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "👷 <b>Create Worker</b>\n\n<b>Please enter worker name:</b>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+        return SETTING_NAME
+    
     # 处理无操作的回调
     elif query.data == "no_action":
         # 不做任何操作，仅关闭回调
@@ -1706,6 +1773,8 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
         return ConversationHandler.END
     elif query.data.startswith("supplier_"):
         return await cost_supplier_handler(update, context)
+    elif query.data.startswith("worker_"):
+        return await worker_select_handler(update, context)
     elif query.data == "skip_receipt":
         # 跳过收据上传，直接显示确认信息
         return await show_cost_confirmation(update, context)
@@ -1887,6 +1956,10 @@ def get_conversation_handlers():
             COST_SUPPLIER: [
                 CallbackQueryHandler(cost_supplier_handler, pattern="^supplier_"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, custom_supplier_handler)
+            ],
+            COST_WORKER: [
+                CallbackQueryHandler(worker_select_handler, pattern="^worker_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, custom_worker_handler)
             ],
             COST_AMOUNT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, cost_amount_handler)
