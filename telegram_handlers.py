@@ -1886,16 +1886,16 @@ async def report_export_handler(update: Update, context: ContextTypes.DEFAULT_TY
         
         # 根据导出类型处理
         if export_type == "sales":
-            result = await sheets_manager.export_sales_report(current_year)
+            result = sheets_manager.export_sales_report(current_year)
             report_name = "销售报表"
         elif export_type == "expenses":
-            result = await sheets_manager.export_expenses_report(current_year)
+            result = sheets_manager.export_expenses_report(current_year)
             report_name = "支出报表"
         elif export_type == "pl":
-            result = await sheets_manager.export_pl_report(current_year)
+            result = sheets_manager.export_pl_report(current_year)
             report_name = "损益报表"
         elif export_type == "lhdn":
-            result = await sheets_manager.export_lhdn_report(current_year)
+            result = sheets_manager.export_lhdn_report(current_year)
             report_name = "LHDN报税汇总"
         else:
             raise ValueError(f"未知的导出类型: {export_type}")
