@@ -1519,16 +1519,12 @@ async def report_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     await close_other_conversations(update, context)
     
     keyboard = [
-        [InlineKeyboardButton("📊 当月报表", callback_data="report_current")],
-        [InlineKeyboardButton("🗓️ 指定月份", callback_data="report_custom")],
-        [InlineKeyboardButton("📈 年度汇总", callback_data="report_yearly")],
-        [InlineKeyboardButton("💹 损益表 (P&L)", callback_data="report_pl")],
         [InlineKeyboardButton("📑 报表导出", callback_data="report_export")],
         [InlineKeyboardButton("🔙 返回主菜单", callback_data="back_main")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    message = "📈 *报表中心*\n\n请选择报表类型："
+    message = "📈 *报表中心*\n\n请选择功能："
     
     # 检查是通过回调查询还是直接命令调用
     if update.callback_query:
@@ -2115,28 +2111,8 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     # 报表生成回调
     elif query.data == "back_report":
         return await report_menu(update, context)
-    elif query.data == "report_current":
-        return await report_current_handler(update, context)
-    elif query.data == "report_custom":
-        return await report_custom_handler(update, context)
-    elif query.data == "report_yearly":
-        await report_yearly_handler(update, context)
-        return ConversationHandler.END
-    elif query.data == "report_pl":
-        return await report_pl_menu(update, context)
     elif query.data == "report_export":
         return await report_export_menu(update, context)
-    # P&L 报表回调
-    elif query.data == "pl_current":
-        return await report_pl_current(update, context)
-    elif query.data == "pl_custom":
-        return await report_pl_custom(update, context)
-    elif query.data == "pl_yearly":
-        return await report_pl_yearly(update, context)
-    elif query.data == "pl_sync_sheet":
-        return await report_pl_sync(update, context)
-    elif query.data.startswith("pl_sync_"):
-        return await report_pl_sync(update, context)
     # 报表导出回调
     elif query.data == "export_sales":
         return await report_export_handler(update, context)
@@ -2367,17 +2343,10 @@ def get_conversation_handlers():
     # 报表生成会话处理器
     report_conversation = ConversationHandler(
         entry_points=[
-            CallbackQueryHandler(report_custom_handler, pattern="^report_custom$"),
-            CallbackQueryHandler(report_pl_custom, pattern="^pl_custom$"),
             CommandHandler("report", report_command)
         ],
         states={
-            REPORT_TYPE: [CallbackQueryHandler(callback_query_handler, pattern="^report_")],
-            REPORT_MONTH: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, 
-                              lambda u, c: report_pl_month_handler(u, c) if c.user_data.get('waiting_for_pl_month') 
-                                         else report_month_handler(u, c))
-            ]
+            REPORT_TYPE: [CallbackQueryHandler(callback_query_handler, pattern="^report_")]
         },
         fallbacks=[
             CallbackQueryHandler(callback_query_handler),
@@ -2416,7 +2385,6 @@ def register_handlers(application):
     application.add_handler(CallbackQueryHandler(sales_callback_handler, pattern='^sales_'))
     application.add_handler(CallbackQueryHandler(expenses_callback_handler, pattern='^(cost_|expenses_)'))
     application.add_handler(CallbackQueryHandler(report_callback_handler, pattern='^report_'))
-    application.add_handler(CallbackQueryHandler(report_callback_handler, pattern='^pl_'))  # 添加 P&L 报表回调处理器
     application.add_handler(CallbackQueryHandler(report_callback_handler, pattern='^export_'))  # 添加报表导出回调处理器
     application.add_handler(CallbackQueryHandler(close_session_handler, pattern='^close_session$'))
     application.add_handler(CallbackQueryHandler(general_callback_handler))
