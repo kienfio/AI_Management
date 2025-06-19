@@ -54,7 +54,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     context.user_data.clear()
     
     keyboard = [
-        [InlineKeyboardButton("📊 Sale Invoice1", callback_data="sales_add")],
+        [InlineKeyboardButton("📊 Sale Invoice", callback_data="sales_add")],
         [InlineKeyboardButton("💵 Coasting", callback_data="menu_cost")],
         [InlineKeyboardButton("📈 Report", callback_data="menu_report")],
         [InlineKeyboardButton("⚙️ Setting", callback_data="menu_setting")],
