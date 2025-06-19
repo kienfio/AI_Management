@@ -20,10 +20,8 @@ SHEET_NAMES = {
     'suppliers': 'Suppliers Management',
     'workers': 'Workers Management',
     'pic': 'Person in Charge',
-    # 新增LHDN报表相关工作表
-    'monthly_pnl': 'Monthly P&L',
-    'salary_summary': 'Salary Summary',
-    'tax_summary': 'LHDN Tax Summary'
+    'pl': 'P&L Reports',  # 添加损益表工作表
+    'lhdn': 'LHDN Tax Summary'  # 添加税务汇总工作表
 }
 
 SALES_HEADERS = ['Date', 'PIC', 'Invoice NO', 'Bill To', 'Amount', 'Status', 'Type', 'Agent Name', 'IC', 'Comm Rate', 'Comm Amount', 'Invoice PDF']
@@ -33,10 +31,14 @@ SUPPLIERS_HEADERS = ['Name', 'Contact', 'Phone', 'Email', 'Products/Services', '
 WORKERS_HEADERS = ['Name', 'Contact', 'Phone', 'Position', 'Status']
 PICS_HEADERS = ['Name', 'Contact', 'Phone', 'Department', 'Status']
 
-# 新增LHDN报表相关表头
-MONTHLY_PNL_HEADERS = ['Month', 'Sales Revenue', 'Commission', 'Gross Profit', 'Expenses', 'Depreciation', 'Own Salary/Allowance', 'Entertainment', 'Gifts', 'Penalties/Fines', 'Other Expenses', 'Total Expenses', 'Net Profit', 'Notes']
-SALARY_SUMMARY_HEADERS = ['Month', 'Worker Name', 'Basic Salary', 'Allowance', 'Overtime', 'EPF Employee', 'EPF Employer', 'SOCSO Employee', 'SOCSO Employer', 'Net Salary', 'Total Employer Cost']
-TAX_SUMMARY_HEADERS = ['Year', 'Total Revenue', 'Business Expenses', 'Depreciation', 'Capital Allowances', 'Business Loss C/F', 'Taxable Business Income', 'Updated Date']
+# 添加 P&L 报表表头
+PL_HEADERS = ['Period', 'Revenue', 'Cost of Goods', 'Commission', 'Gross Profit', 
+              'Salary Expense', 'Utility Expense', 'Other Expense', 'Total Operating Expense', 
+              'Net Profit', 'Profit Margin (%)']
+
+# 添加 LHDN 税务汇总表头
+LHDN_HEADERS = ['Year', 'Month', 'Total Revenue', 'Total Expenses', 'Net Income', 
+                'Business Income', 'Business Expenses', 'Taxable Income']
 
 logger = logging.getLogger(__name__)
 
@@ -171,12 +173,10 @@ class GoogleSheetsManager:
                     worksheet.append_row(WORKERS_HEADERS)
                 elif sheet_key == 'pic':
                     worksheet.append_row(PICS_HEADERS)
-                elif sheet_key == 'monthly_pnl':
-                    worksheet.append_row(MONTHLY_PNL_HEADERS)
-                elif sheet_key == 'salary_summary':
-                    worksheet.append_row(SALARY_SUMMARY_HEADERS)
-                elif sheet_key == 'tax_summary':
-                    worksheet.append_row(TAX_SUMMARY_HEADERS)
+                elif sheet_key == 'pl':
+                    worksheet.append_row(PL_HEADERS)
+                elif sheet_key == 'lhdn':
+                    worksheet.append_row(LHDN_HEADERS)
                 
                 logger.info(f"✅ 创建工作表: {sheet_name}")
     
@@ -718,461 +718,573 @@ class GoogleSheetsManager:
             return None
 
     # =============================================================================
-    # LHDN 报表生成 - 税务相关报表
+    # 损益表 (P&L) 报表生成
     # =============================================================================
-    
-    def generate_yearly_report(self, year=None) -> Dict[str, Any]:
-        """生成年度汇总报表"""
-        if year is None:
-            year = datetime.now().year
-        
+
+    async def generate_pl_report(self, month: str) -> Dict[str, Any]:
+        """生成月度损益表"""
         try:
-            # 构建月份列表
-            months = []
-            for month in range(1, 13):
-                month_str = f"{year}-{month:02d}"
-                months.append(month_str)
+            # 获取销售记录和费用记录
+            sales_records = self.get_sales_records(month)
+            expense_records = self.get_expense_records(month)
             
-            # 获取每月报表并汇总
-            total_sales = 0
-            total_commission = 0
-            total_expenses = 0
-            total_purchase = 0
-            total_utility = 0
-            total_salary = 0
-            total_other = 0
+            # 计算收入
+            revenue = sum(float(r.get('amount', 0)) for r in sales_records)
             
-            for month in months:
-                report = self.generate_monthly_report(month)
-                total_sales += report['total_sales']
-                total_commission += report['total_commission']
-                total_expenses += report['total_cost']
-                total_purchase += report['purchase_cost']
-                total_utility += report['utility_cost']
-                total_salary += report['salary_cost']
-                total_other += report['other_cost']
+            # 计算成本
+            cost_of_goods = 0
+            commission_cost = sum(float(r.get('commission', 0)) for r in sales_records)
             
-            # 计算综合指标
-            gross_profit = total_sales - total_commission
-            net_profit = gross_profit - total_expenses
+            # 按类型统计费用
+            expense_by_type = {}
+            for record in expense_records:
+                expense_type = record.get('Expense Type', record.get('expense_type', '其他'))
+                amount = self._parse_number(record.get('Amount', record.get('amount', 0)))
+                expense_by_type[expense_type] = expense_by_type.get(expense_type, 0) + amount
             
-            # 计算月平均值
-            months_count = len(months)
-            avg_monthly_income = total_sales / months_count if months_count > 0 else 0
-            avg_monthly_cost = total_expenses / months_count if months_count > 0 else 0
+            # 计算营业费用
+            salary_expense = expense_by_type.get('Worker Salary', 0)
+            utility_expense = expense_by_type.get('Billing', 0) + expense_by_type.get('Water Bill', 0) + \
+                             expense_by_type.get('Electricity Bill', 0) + expense_by_type.get('WiFi Bill', 0)
+            other_expense = sum(amount for expense_type, amount in expense_by_type.items() 
+                               if expense_type not in ['Worker Salary', 'Billing', 'Water Bill', 'Electricity Bill', 'WiFi Bill'])
+            
+            # 计算总营业费用
+            total_operating_expense = salary_expense + utility_expense + other_expense
+            
+            # 计算毛利润和净利润
+            gross_profit = revenue - cost_of_goods - commission_cost
+            net_profit = gross_profit - total_operating_expense
+            
+            # 计算利润率
+            profit_margin = (net_profit / revenue * 100) if revenue > 0 else 0
             
             return {
-                'year': year,
-                'total_sales': total_sales,
-                'total_commission': total_commission,
+                'period': month,
+                'revenue': revenue,
+                'cost_of_goods': cost_of_goods,
+                'commission_cost': commission_cost,
                 'gross_profit': gross_profit,
-                'total_cost': total_expenses,
-                'purchase_cost': total_purchase,
-                'utility_cost': total_utility,
-                'salary_cost': total_salary,
-                'other_cost': total_other,
+                'salary_expense': salary_expense,
+                'utility_expense': utility_expense,
+                'other_expense': other_expense,
+                'total_operating_expense': total_operating_expense,
                 'net_profit': net_profit,
-                'avg_monthly_income': avg_monthly_income,
-                'avg_monthly_cost': avg_monthly_cost
+                'profit_margin': profit_margin
             }
             
         except Exception as e:
-            logger.error(f"❌ 生成年度报表失败: {e}")
+            logger.error(f"❌ 生成损益表失败: {e}")
             # 返回空报表
             return {
-                'year': year,
-                'total_sales': 0,
-                'total_commission': 0,
+                'period': month,
+                'revenue': 0,
+                'cost_of_goods': 0,
+                'commission_cost': 0,
                 'gross_profit': 0,
-                'total_cost': 0,
-                'purchase_cost': 0,
-                'utility_cost': 0,
-                'salary_cost': 0,
-                'other_cost': 0,
+                'salary_expense': 0,
+                'utility_expense': 0,
+                'other_expense': 0,
+                'total_operating_expense': 0,
                 'net_profit': 0,
-                'avg_monthly_income': 0,
-                'avg_monthly_cost': 0
+                'profit_margin': 0
             }
-    
-    def generate_pnl_report(self, year=None) -> Dict[str, Any]:
-        """
-        生成P&L损益表 (符合LHDN Working Sheets格式)
-        
-        按照LHDN要求，将支出分类为：
-        - 折旧(Depreciation)
-        - 自身薪资/津贴/奖金(Own salary/allowance/bonus)
-        - 娱乐费用(Entertainment)
-        - 礼品(Gifts)
-        - 罚款(Penalties/fines)
-        - 其他费用(Other expenses)
-        """
-        if year is None:
-            year = datetime.now().year
-            
+
+    async def generate_yearly_pl_report(self, year: int) -> Dict[str, Any]:
+        """生成年度损益表"""
         try:
-            # 获取全年报表基础数据
-            yearly_data = self.generate_yearly_report(year)
+            yearly_data = {
+                'revenue': 0,
+                'cost_of_goods': 0,
+                'commission_cost': 0,
+                'gross_profit': 0,
+                'salary_expense': 0,
+                'utility_expense': 0,
+                'other_expense': 0,
+                'total_operating_expense': 0,
+                'net_profit': 0,
+                'profit_margin': 0
+            }
             
-            # 获取全年所有费用记录以进行详细分类
-            expense_records = []
+            # 累计每个月的数据
             for month in range(1, 13):
                 month_str = f"{year}-{month:02d}"
-                monthly_expenses = self.get_expense_records(month_str)
-                expense_records.extend(monthly_expenses)
-            
-            # 按LHDN分类统计费用
-            # 1. 初始化所有类别
-            lhdn_expenses = {
-                'depreciation': 0,              # 折旧
-                'own_salary_allowance': 0,      # 自身薪资/津贴
-                'entertainment': 0,             # 娱乐费用
-                'gifts': 0,                     # 礼品
-                'penalties_fines': 0,           # 罚款
-                'other_expenses': 0             # 其他费用
-            }
-            
-            # 2. 分析每条费用记录并分类
-            for record in expense_records:
-                expense_type = record.get('Expense Type', record.get('expense_type', ''))
-                category = record.get('Category', record.get('category', ''))
-                description = record.get('Notes', record.get('description', ''))
-                amount = self._parse_number(record.get('Amount', record.get('amount', 0)))
+                monthly_data = await self.generate_pl_report(month_str)
                 
-                # 基于类型、类别和描述进行分类
-                if expense_type == 'Depreciation' or 'depreciation' in description.lower():
-                    lhdn_expenses['depreciation'] += amount
-                elif expense_type == 'Own Salary' or 'salary' in description.lower() and 'owner' in description.lower():
-                    lhdn_expenses['own_salary_allowance'] += amount
-                elif 'entertainment' in description.lower() or 'entertain' in category.lower():
-                    lhdn_expenses['entertainment'] += amount
-                elif 'gift' in description.lower() or 'gift' in category.lower():
-                    lhdn_expenses['gifts'] += amount
-                elif 'penalty' in description.lower() or 'fine' in description.lower() or 'summon' in description.lower():
-                    lhdn_expenses['penalties_fines'] += amount
-                else:
-                    # 其他所有费用归为其他类别
-                    lhdn_expenses['other_expenses'] += amount
+                # 累加各项数据
+                for key in yearly_data.keys():
+                    if key != 'profit_margin':  # 利润率不需要累加
+                        yearly_data[key] += monthly_data[key]
             
-            # 合并结果到年度报表
-            result = {
-                'year': year,
-                'sales_revenue': yearly_data['total_sales'],
-                'commission': yearly_data['total_commission'],
-                'gross_profit': yearly_data['gross_profit'],
-                'total_expenses': yearly_data['total_cost'],
-                'depreciation': lhdn_expenses['depreciation'],
-                'own_salary_allowance': lhdn_expenses['own_salary_allowance'],
-                'entertainment': lhdn_expenses['entertainment'],
-                'gifts': lhdn_expenses['gifts'],
-                'penalties_fines': lhdn_expenses['penalties_fines'],
-                'other_expenses': lhdn_expenses['other_expenses'],
-                'net_profit': yearly_data['net_profit']
-            }
+            # 重新计算年度利润率
+            yearly_data['profit_margin'] = (yearly_data['net_profit'] / yearly_data['revenue'] * 100) if yearly_data['revenue'] > 0 else 0
             
-            # 保存到Google Sheets
-            self._save_pnl_report(result)
+            # 添加期间信息
+            yearly_data['period'] = str(year)
             
-            return result
+            return yearly_data
             
         except Exception as e:
-            logger.error(f"❌ 生成P&L损益表失败: {e}")
+            logger.error(f"❌ 生成年度损益表失败: {e}")
             # 返回空报表
             return {
-                'year': year,
-                'sales_revenue': 0,
-                'commission': 0,
+                'period': str(year),
+                'revenue': 0,
+                'cost_of_goods': 0,
+                'commission_cost': 0,
                 'gross_profit': 0,
-                'total_expenses': 0,
-                'depreciation': 0,
-                'own_salary_allowance': 0,
-                'entertainment': 0,
-                'gifts': 0,
-                'penalties_fines': 0,
-                'other_expenses': 0,
-                'net_profit': 0
+                'salary_expense': 0,
+                'utility_expense': 0,
+                'other_expense': 0,
+                'total_operating_expense': 0,
+                'net_profit': 0,
+                'profit_margin': 0
             }
-    
-    def _save_pnl_report(self, pnl_data: Dict[str, Any]) -> bool:
-        """将P&L报表数据保存到Google Sheets"""
+
+    async def sync_monthly_pl_to_sheet(self, month: str) -> Dict[str, Any]:
+        """同步月度损益表到Google表格"""
         try:
-            worksheet = self.get_worksheet(SHEET_NAMES['monthly_pnl'])
-            if not worksheet:
-                return False
+            # 生成损益表数据
+            pl_data = await self.generate_pl_report(month)
             
-            # 添加报表数据
-            month_name = datetime.now().strftime('%Y-%m')
+            # 获取P&L工作表
+            worksheet = self.get_worksheet(SHEET_NAMES['pl'])
+            if not worksheet:
+                logger.error("❌ 获取P&L工作表失败")
+                return None
+            
+            # 检查是否已存在该月份的数据
+            all_values = worksheet.get_all_values()
+            if len(all_values) > 1:  # 有表头和数据
+                for i, row in enumerate(all_values[1:], start=2):  # 从第2行开始（跳过表头）
+                    if row[0] == month:  # 第一列是期间
+                        # 更新现有行
+                        row_data = [
+                            pl_data['period'],
+                            pl_data['revenue'],
+                            pl_data['cost_of_goods'],
+                            pl_data['commission_cost'],
+                            pl_data['gross_profit'],
+                            pl_data['salary_expense'],
+                            pl_data['utility_expense'],
+                            pl_data['other_expense'],
+                            pl_data['total_operating_expense'],
+                            pl_data['net_profit'],
+                            f"{pl_data['profit_margin']:.1f}%"
+                        ]
+                        worksheet.update(f'A{i}:K{i}', [row_data])
+                        logger.info(f"✅ 更新月度损益表成功: {month}")
+                        return {
+                            'sheet_name': SHEET_NAMES['pl'],
+                            'tab_name': 'Monthly P&L',
+                            'period': month
+                        }
+            
+            # 如果不存在，添加新行
             row_data = [
-                f"{pnl_data['year']}年度",  # 月份/年度
-                pnl_data['sales_revenue'],   # 销售收入
-                pnl_data['commission'],      # 佣金
-                pnl_data['gross_profit'],    # 毛利润
-                pnl_data['total_expenses'],  # 总支出
-                pnl_data['depreciation'],    # 折旧
-                pnl_data['own_salary_allowance'],  # 自身薪资/津贴
-                pnl_data['entertainment'],   # 娱乐费用
-                pnl_data['gifts'],           # 礼品
-                pnl_data['penalties_fines'], # 罚款
-                pnl_data['other_expenses'],  # 其他费用
-                pnl_data['total_expenses'],  # 总支出(重复)
-                pnl_data['net_profit'],      # 净利润
-                f"Generated on {datetime.now().strftime('%Y-%m-%d')}"  # 备注
+                pl_data['period'],
+                pl_data['revenue'],
+                pl_data['cost_of_goods'],
+                pl_data['commission_cost'],
+                pl_data['gross_profit'],
+                pl_data['salary_expense'],
+                pl_data['utility_expense'],
+                pl_data['other_expense'],
+                pl_data['total_operating_expense'],
+                pl_data['net_profit'],
+                f"{pl_data['profit_margin']:.1f}%"
             ]
-            
             worksheet.append_row(row_data)
-            logger.info(f"✅ P&L报表数据已保存到Google Sheets")
-            return True
+            logger.info(f"✅ 添加月度损益表成功: {month}")
             
-        except Exception as e:
-            logger.error(f"❌ 保存P&L报表失败: {e}")
-            return False
-    
-    def generate_salary_summary(self, year=None, month=None) -> List[Dict[str, Any]]:
-        """
-        生成员工薪资汇总报表
-        
-        Args:
-            year: 年份，如果为None则使用当前年份
-            month: 月份，如果为None则汇总整年
-        
-        Returns:
-            List[Dict]: 薪资汇总数据列表，每个工人一条记录
-        """
-        if year is None:
-            year = datetime.now().year
-            
-        try:
-            # 获取所有工人工资记录
-            expense_records = []
-            
-            if month is None:
-                # 获取全年记录
-                for m in range(1, 13):
-                    month_str = f"{year}-{m:02d}"
-                    monthly_expenses = self.get_expense_records(month_str)
-                    # 只过滤工资记录
-                    salary_records = [r for r in monthly_expenses if r.get('Expense Type', r.get('expense_type', '')) == 'Worker Salary']
-                    expense_records.extend(salary_records)
-                period = f"{year}年度"
-            else:
-                # 获取指定月份记录
-                month_str = f"{year}-{month:02d}" if isinstance(month, int) else month
-                monthly_expenses = self.get_expense_records(month_str)
-                # 只过滤工资记录
-                salary_records = [r for r in monthly_expenses if r.get('Expense Type', r.get('expense_type', '')) == 'Worker Salary']
-                expense_records.extend(salary_records)
-                period = month_str
-            
-            # 按工人分组汇总
-            worker_summary = {}
-            
-            for record in expense_records:
-                worker_name = record.get('Supplier', record.get('supplier', ''))
-                if not worker_name:
-                    continue
-                
-                # 获取薪资详情
-                amount = self._parse_number(record.get('Amount', record.get('amount', 0)))
-                
-                # 提取EPF和SOCSO相关数据
-                basic_salary = self._parse_number(record.get('basic_salary', 0))
-                allowance = self._parse_number(record.get('allowance', 0))
-                overtime = self._parse_number(record.get('overtime', 0))
-                epf_employee = self._parse_number(record.get('epf_employee', 0))
-                epf_employer = self._parse_number(record.get('epf_employer', 0))
-                socso_employee = self._parse_number(record.get('socso_employee', 0))
-                socso_employer = self._parse_number(record.get('socso_employer', 0))
-                net_salary = self._parse_number(record.get('net_salary', amount))  # 如果没有net_salary字段，使用amount
-                total_cost = self._parse_number(record.get('total_cost', amount + epf_employer + socso_employer))
-                
-                # 初始化工人数据
-                if worker_name not in worker_summary:
-                    worker_summary[worker_name] = {
-                        'worker_name': worker_name,
-                        'basic_salary': 0,
-                        'allowance': 0,
-                        'overtime': 0,
-                        'epf_employee': 0,
-                        'epf_employer': 0,
-                        'socso_employee': 0,
-                        'socso_employer': 0,
-                        'net_salary': 0,
-                        'total_employer_cost': 0
-                    }
-                
-                # 累加数据
-                worker_summary[worker_name]['basic_salary'] += basic_salary
-                worker_summary[worker_name]['allowance'] += allowance
-                worker_summary[worker_name]['overtime'] += overtime
-                worker_summary[worker_name]['epf_employee'] += epf_employee
-                worker_summary[worker_name]['epf_employer'] += epf_employer
-                worker_summary[worker_name]['socso_employee'] += socso_employee
-                worker_summary[worker_name]['socso_employer'] += socso_employer
-                worker_summary[worker_name]['net_salary'] += net_salary
-                worker_summary[worker_name]['total_employer_cost'] += total_cost
-            
-            # 转换为列表
-            result = []
-            for worker_name, summary in worker_summary.items():
-                # 添加期间信息
-                summary['period'] = period
-                result.append(summary)
-            
-            # 保存到Google Sheets
-            self._save_salary_summary(result, period)
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"❌ 生成员工薪资汇总失败: {e}")
-            return []
-    
-    def _save_salary_summary(self, salary_data: List[Dict[str, Any]], period: str) -> bool:
-        """将员工薪资汇总数据保存到Google Sheets"""
-        try:
-            worksheet = self.get_worksheet(SHEET_NAMES['salary_summary'])
-            if not worksheet:
-                return False
-            
-            # 添加每个工人的数据
-            for worker_data in salary_data:
-                row_data = [
-                    period,                              # 期间(月份或年度)
-                    worker_data['worker_name'],          # 工人姓名
-                    worker_data['basic_salary'],         # 基本工资
-                    worker_data['allowance'],            # 津贴
-                    worker_data['overtime'],             # 加班费
-                    worker_data['epf_employee'],         # EPF员工缴费
-                    worker_data['epf_employer'],         # EPF雇主缴费
-                    worker_data['socso_employee'],       # SOCSO员工缴费
-                    worker_data['socso_employer'],       # SOCSO雇主缴费
-                    worker_data['net_salary'],           # 净工资
-                    worker_data['total_employer_cost']   # 雇主总成本
-                ]
-                
-                worksheet.append_row(row_data)
-            
-            logger.info(f"✅ 员工薪资汇总数据已保存到Google Sheets，期间: {period}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"❌ 保存员工薪资汇总失败: {e}")
-            return False
-    
-    def generate_tax_summary(self, year=None) -> Dict[str, Any]:
-        """
-        生成LHDN税务摘要报表
-        
-        按照LHDN Form B要求，包含：
-        - 总收入（总营业额）
-        - 总可扣除费用（按LHDN分类）
-        - 资本津贴与扣减
-        - 净课税利润（应课税收入）
-        """
-        if year is None:
-            year = datetime.now().year
-            
-        try:
-            # 获取P&L报表数据作为基础
-            pnl_data = self.generate_pnl_report(year)
-            
-            # 计算总可扣除费用
-            # 注意：根据LHDN规定，某些支出可能不可完全扣除
-            business_expenses = pnl_data['total_expenses']
-            
-            # 折旧不能直接扣除，而是通过资本津贴扣除
-            # 按50%资本津贴率计算（简化处理）
-            depreciation = pnl_data['depreciation']
-            capital_allowances = depreciation * 0.5  # 资本津贴通常是设备折旧的50%
-            
-            # 计算应课税收入
-            taxable_income = pnl_data['sales_revenue'] - business_expenses + depreciation - capital_allowances
-            
-            # 如果有前期亏损结转，可以抵消部分应课税收入
-            business_loss_cf = 0  # 假设没有前期亏损结转
-            
-            if taxable_income < 0:
-                # 如果当年亏损，可以结转至下一年
-                business_loss_cf = abs(taxable_income)
-                taxable_income = 0
-            
-            # 创建税务摘要
-            tax_summary = {
-                'year': year,
-                'total_revenue': pnl_data['sales_revenue'],
-                'business_expenses': business_expenses,
-                'depreciation': depreciation,
-                'capital_allowances': capital_allowances,
-                'business_loss_cf': business_loss_cf,
-                'taxable_business_income': taxable_income,
-                'updated_date': datetime.now().strftime('%Y-%m-%d')
-            }
-            
-            # 保存到Google Sheets
-            self._save_tax_summary(tax_summary)
-            
-            return tax_summary
-            
-        except Exception as e:
-            logger.error(f"❌ 生成税务摘要报表失败: {e}")
-            # 返回空报表
             return {
-                'year': year,
-                'total_revenue': 0,
-                'business_expenses': 0,
-                'depreciation': 0,
-                'capital_allowances': 0,
-                'business_loss_cf': 0,
-                'taxable_business_income': 0,
-                'updated_date': datetime.now().strftime('%Y-%m-%d')
+                'sheet_name': SHEET_NAMES['pl'],
+                'tab_name': 'Monthly P&L',
+                'period': month
             }
-    
-    def _save_tax_summary(self, tax_data: Dict[str, Any]) -> bool:
-        """将税务摘要数据保存到Google Sheets"""
+            
+        except Exception as e:
+            logger.error(f"❌ 同步月度损益表失败: {e}")
+            return None
+
+    async def sync_yearly_pl_to_sheet(self, year: int) -> Dict[str, Any]:
+        """同步年度损益表到Google表格"""
         try:
-            worksheet = self.get_worksheet(SHEET_NAMES['tax_summary'])
+            # 生成年度损益表数据
+            pl_data = await self.generate_yearly_pl_report(year)
+            
+            # 获取P&L工作表
+            worksheet = self.get_worksheet(SHEET_NAMES['pl'])
             if not worksheet:
-                return False
+                logger.error("❌ 获取P&L工作表失败")
+                return None
             
-            # 添加税务摘要数据
+            # 检查是否已存在该年份的数据
+            all_values = worksheet.get_all_values()
+            if len(all_values) > 1:  # 有表头和数据
+                for i, row in enumerate(all_values[1:], start=2):  # 从第2行开始（跳过表头）
+                    if row[0] == str(year):  # 第一列是期间
+                        # 更新现有行
+                        row_data = [
+                            pl_data['period'],
+                            pl_data['revenue'],
+                            pl_data['cost_of_goods'],
+                            pl_data['commission_cost'],
+                            pl_data['gross_profit'],
+                            pl_data['salary_expense'],
+                            pl_data['utility_expense'],
+                            pl_data['other_expense'],
+                            pl_data['total_operating_expense'],
+                            pl_data['net_profit'],
+                            f"{pl_data['profit_margin']:.1f}%"
+                        ]
+                        worksheet.update(f'A{i}:K{i}', [row_data])
+                        logger.info(f"✅ 更新年度损益表成功: {year}")
+                        return {
+                            'sheet_name': SHEET_NAMES['pl'],
+                            'tab_name': 'Yearly P&L',
+                            'period': str(year)
+                        }
+            
+            # 如果不存在，添加新行
             row_data = [
-                f"{tax_data['year']}年度",       # 年度
-                tax_data['total_revenue'],        # 总收入
-                tax_data['business_expenses'],    # 业务支出
-                tax_data['depreciation'],         # 折旧
-                tax_data['capital_allowances'],   # 资本津贴
-                tax_data['business_loss_cf'],     # 亏损结转
-                tax_data['taxable_business_income'], # 应课税收入
-                tax_data['updated_date']          # 更新日期
+                pl_data['period'],
+                pl_data['revenue'],
+                pl_data['cost_of_goods'],
+                pl_data['commission_cost'],
+                pl_data['gross_profit'],
+                pl_data['salary_expense'],
+                pl_data['utility_expense'],
+                pl_data['other_expense'],
+                pl_data['total_operating_expense'],
+                pl_data['net_profit'],
+                f"{pl_data['profit_margin']:.1f}%"
             ]
-            
             worksheet.append_row(row_data)
-            logger.info(f"✅ 税务摘要数据已保存到Google Sheets")
-            return True
+            logger.info(f"✅ 添加年度损益表成功: {year}")
+            
+            return {
+                'sheet_name': SHEET_NAMES['pl'],
+                'tab_name': 'Yearly P&L',
+                'period': str(year)
+            }
             
         except Exception as e:
-            logger.error(f"❌ 保存税务摘要失败: {e}")
-            return False
-    
-    def export_all_reports(self, year=None) -> bool:
-        """
-        导出所有报表到Google Sheets
-        
-        生成并同步更新P&L损益表、员工薪资汇总和税务摘要
-        """
-        if year is None:
-            year = datetime.now().year
-            
+            logger.error(f"❌ 同步年度损益表失败: {e}")
+            return None
+
+    # =============================================================================
+    # 报表导出功能
+    # =============================================================================
+
+    async def export_sales_report(self, year: int) -> Dict[str, Any]:
+        """导出销售报表到Google表格"""
         try:
-            # 生成并保存所有报表
-            self.generate_pnl_report(year)
-            self.generate_salary_summary(year)
-            self.generate_tax_summary(year)
+            # 创建或获取销售报表工作表
+            sheet_name = f"Sales Report {year}"
+            try:
+                worksheet = self.spreadsheet.worksheet(sheet_name)
+                # 如果工作表已存在，清空内容
+                worksheet.clear()
+            except:
+                # 如果工作表不存在，创建新工作表
+                worksheet = self.spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=20)
             
-            logger.info(f"✅ 所有报表已成功导出到Google Sheets")
-            return True
+            # 添加表头
+            headers = ['Month', 'Total Sales', 'Total Commission', 'Net Sales']
+            worksheet.append_row(headers)
+            
+            # 按月获取销售数据
+            monthly_data = []
+            yearly_totals = {'sales': 0, 'commission': 0, 'net': 0}
+            
+            for month in range(1, 13):
+                month_str = f"{year}-{month:02d}"
+                # 获取月度报表数据
+                report_data = await self.generate_monthly_report(month_str)
+                
+                # 添加到月度数据列表
+                monthly_data.append([
+                    month_str,
+                    report_data['total_sales'],
+                    report_data['total_commission'],
+                    report_data['gross_profit']
+                ])
+                
+                # 累加年度总计
+                yearly_totals['sales'] += report_data['total_sales']
+                yearly_totals['commission'] += report_data['total_commission']
+                yearly_totals['net'] += report_data['gross_profit']
+            
+            # 添加月度数据
+            worksheet.append_rows(monthly_data)
+            
+            # 添加年度总计
+            worksheet.append_row([])  # 空行
+            worksheet.append_row([
+                f"Total {year}",
+                yearly_totals['sales'],
+                yearly_totals['commission'],
+                yearly_totals['net']
+            ])
+            
+            # 格式化数字列为货币格式
+            worksheet.format('B2:D15', {'numberFormat': {'type': 'CURRENCY', 'pattern': '"RM"#,##0.00'}})
+            
+            logger.info(f"✅ 销售报表导出成功: {sheet_name}")
+            
+            return {
+                'sheet_name': sheet_name,
+                'sheet_url': f"https://docs.google.com/spreadsheets/d/{self.spreadsheet_id}/edit#gid={worksheet.id}",
+                'year': year
+            }
+            
         except Exception as e:
-            logger.error(f"❌ 导出报表失败: {e}")
-            return False
+            logger.error(f"❌ 导出销售报表失败: {e}")
+            return None
+
+    async def export_expenses_report(self, year: int) -> Dict[str, Any]:
+        """导出支出报表到Google表格"""
+        try:
+            # 创建或获取支出报表工作表
+            sheet_name = f"Expenses Report {year}"
+            try:
+                worksheet = self.spreadsheet.worksheet(sheet_name)
+                # 如果工作表已存在，清空内容
+                worksheet.clear()
+            except:
+                # 如果工作表不存在，创建新工作表
+                worksheet = self.spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=20)
+            
+            # 添加表头
+            headers = ['Month', 'Purchasing', 'Utilities', 'Salaries', 'Other', 'Total Expenses']
+            worksheet.append_row(headers)
+            
+            # 按月获取支出数据
+            monthly_data = []
+            yearly_totals = {'purchasing': 0, 'utilities': 0, 'salaries': 0, 'other': 0, 'total': 0}
+            
+            for month in range(1, 13):
+                month_str = f"{year}-{month:02d}"
+                # 获取月度报表数据
+                report_data = await self.generate_monthly_report(month_str)
+                
+                # 添加到月度数据列表
+                monthly_data.append([
+                    month_str,
+                    report_data['purchase_cost'],
+                    report_data['utility_cost'],
+                    report_data['salary_cost'],
+                    report_data['other_cost'],
+                    report_data['total_cost']
+                ])
+                
+                # 累加年度总计
+                yearly_totals['purchasing'] += report_data['purchase_cost']
+                yearly_totals['utilities'] += report_data['utility_cost']
+                yearly_totals['salaries'] += report_data['salary_cost']
+                yearly_totals['other'] += report_data['other_cost']
+                yearly_totals['total'] += report_data['total_cost']
+            
+            # 添加月度数据
+            worksheet.append_rows(monthly_data)
+            
+            # 添加年度总计
+            worksheet.append_row([])  # 空行
+            worksheet.append_row([
+                f"Total {year}",
+                yearly_totals['purchasing'],
+                yearly_totals['utilities'],
+                yearly_totals['salaries'],
+                yearly_totals['other'],
+                yearly_totals['total']
+            ])
+            
+            # 格式化数字列为货币格式
+            worksheet.format('B2:F15', {'numberFormat': {'type': 'CURRENCY', 'pattern': '"RM"#,##0.00'}})
+            
+            logger.info(f"✅ 支出报表导出成功: {sheet_name}")
+            
+            return {
+                'sheet_name': sheet_name,
+                'sheet_url': f"https://docs.google.com/spreadsheets/d/{self.spreadsheet_id}/edit#gid={worksheet.id}",
+                'year': year
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ 导出支出报表失败: {e}")
+            return None
+
+    async def export_pl_report(self, year: int) -> Dict[str, Any]:
+        """导出损益表到Google表格"""
+        try:
+            # 创建或获取损益表工作表
+            sheet_name = f"P&L Report {year}"
+            try:
+                worksheet = self.spreadsheet.worksheet(sheet_name)
+                # 如果工作表已存在，清空内容
+                worksheet.clear()
+            except:
+                # 如果工作表不存在，创建新工作表
+                worksheet = self.spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=20)
+            
+            # 添加表头
+            headers = ['Period', 'Revenue', 'Cost of Goods', 'Commission', 'Gross Profit', 
+                      'Salary Expense', 'Utility Expense', 'Other Expense', 'Total Operating Expense', 
+                      'Net Profit', 'Profit Margin (%)']
+            worksheet.append_row(headers)
+            
+            # 按月获取损益表数据
+            monthly_data = []
+            
+            for month in range(1, 13):
+                month_str = f"{year}-{month:02d}"
+                # 获取月度损益表数据
+                pl_data = await self.generate_pl_report(month_str)
+                
+                # 添加到月度数据列表
+                monthly_data.append([
+                    pl_data['period'],
+                    pl_data['revenue'],
+                    pl_data['cost_of_goods'],
+                    pl_data['commission_cost'],
+                    pl_data['gross_profit'],
+                    pl_data['salary_expense'],
+                    pl_data['utility_expense'],
+                    pl_data['other_expense'],
+                    pl_data['total_operating_expense'],
+                    pl_data['net_profit'],
+                    f"{pl_data['profit_margin']:.1f}%"
+                ])
+            
+            # 添加月度数据
+            worksheet.append_rows(monthly_data)
+            
+            # 添加年度总计
+            worksheet.append_row([])  # 空行
+            
+            # 获取年度损益表数据
+            yearly_data = await self.generate_yearly_pl_report(year)
+            
+            worksheet.append_row([
+                f"Total {year}",
+                yearly_data['revenue'],
+                yearly_data['cost_of_goods'],
+                yearly_data['commission_cost'],
+                yearly_data['gross_profit'],
+                yearly_data['salary_expense'],
+                yearly_data['utility_expense'],
+                yearly_data['other_expense'],
+                yearly_data['total_operating_expense'],
+                yearly_data['net_profit'],
+                f"{yearly_data['profit_margin']:.1f}%"
+            ])
+            
+            # 格式化数字列为货币格式
+            worksheet.format('B2:J14', {'numberFormat': {'type': 'CURRENCY', 'pattern': '"RM"#,##0.00'}})
+            
+            logger.info(f"✅ 损益表导出成功: {sheet_name}")
+            
+            return {
+                'sheet_name': sheet_name,
+                'sheet_url': f"https://docs.google.com/spreadsheets/d/{self.spreadsheet_id}/edit#gid={worksheet.id}",
+                'year': year
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ 导出损益表失败: {e}")
+            return None
+
+    async def export_lhdn_report(self, year: int) -> Dict[str, Any]:
+        """导出LHDN税务汇总报表到Google表格"""
+        try:
+            # 创建或获取LHDN报表工作表
+            sheet_name = f"LHDN Tax Summary {year}"
+            try:
+                worksheet = self.spreadsheet.worksheet(sheet_name)
+                # 如果工作表已存在，清空内容
+                worksheet.clear()
+            except:
+                # 如果工作表不存在，创建新工作表
+                worksheet = self.spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=20)
+            
+            # 添加表头
+            headers = ['Year', 'Month', 'Total Revenue', 'Total Expenses', 'Net Income', 
+                      'Business Income', 'Business Expenses', 'Taxable Income']
+            worksheet.append_row(headers)
+            
+            # 按月获取税务汇总数据
+            monthly_data = []
+            yearly_totals = {
+                'revenue': 0, 'expenses': 0, 'net_income': 0, 
+                'business_income': 0, 'business_expenses': 0, 'taxable_income': 0
+            }
+            
+            for month in range(1, 13):
+                month_str = f"{year}-{month:02d}"
+                # 获取月度报表数据
+                report_data = await self.generate_monthly_report(month_str)
+                
+                # 计算税务相关数据
+                revenue = report_data['total_sales']
+                expenses = report_data['total_cost']
+                net_income = report_data['net_profit']
+                
+                # 业务收入和支出（可根据实际税务规则调整）
+                business_income = revenue
+                business_expenses = expenses
+                taxable_income = net_income
+                
+                # 添加到月度数据列表
+                monthly_data.append([
+                    str(year),
+                    month_str,
+                    revenue,
+                    expenses,
+                    net_income,
+                    business_income,
+                    business_expenses,
+                    taxable_income
+                ])
+                
+                # 累加年度总计
+                yearly_totals['revenue'] += revenue
+                yearly_totals['expenses'] += expenses
+                yearly_totals['net_income'] += net_income
+                yearly_totals['business_income'] += business_income
+                yearly_totals['business_expenses'] += business_expenses
+                yearly_totals['taxable_income'] += taxable_income
+            
+            # 添加月度数据
+            worksheet.append_rows(monthly_data)
+            
+            # 添加年度总计
+            worksheet.append_row([])  # 空行
+            worksheet.append_row([
+                str(year),
+                'Total',
+                yearly_totals['revenue'],
+                yearly_totals['expenses'],
+                yearly_totals['net_income'],
+                yearly_totals['business_income'],
+                yearly_totals['business_expenses'],
+                yearly_totals['taxable_income']
+            ])
+            
+            # 格式化数字列为货币格式
+            worksheet.format('C2:H14', {'numberFormat': {'type': 'CURRENCY', 'pattern': '"RM"#,##0.00'}})
+            
+            logger.info(f"✅ LHDN税务汇总报表导出成功: {sheet_name}")
+            
+            return {
+                'sheet_name': sheet_name,
+                'sheet_url': f"https://docs.google.com/spreadsheets/d/{self.spreadsheet_id}/edit#gid={worksheet.id}",
+                'year': year
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ 导出LHDN税务汇总报表失败: {e}")
+            return None
 
 # 创建全局实例
 sheets_manager = GoogleSheetsManager()
