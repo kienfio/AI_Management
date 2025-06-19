@@ -35,6 +35,9 @@ SALES_PERSON, SALES_AMOUNT, SALES_BILL_TO, SALES_CLIENT, SALES_COMMISSION_TYPE, 
 # 费用管理状态
 COST_TYPE, COST_SUPPLIER, COST_AMOUNT, COST_DESC, COST_RECEIPT, COST_CONFIRM, COST_WORKER = range(7)  # 添加 COST_WORKER 状态
 
+# 工人薪资计算相关状态
+WORKER_BASIC_SALARY, WORKER_ALLOWANCE, WORKER_OT, WORKER_DEDUCTIONS, WORKER_EPF_RATE, WORKER_CONFIRM = range(10, 16)
+
 # 报表生成状态
 REPORT_TYPE, REPORT_MONTH = range(2)
 
@@ -1270,6 +1273,41 @@ async def cost_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             'description': desc,
             'receipt': receipt_link  # 使用Google Drive链接
         }
+        
+        # 如果是工资，并且启用了EPF或SOCSO，添加相关数据
+        if cost_type == "Worker Salary":
+            # 添加基本工资、津贴和加班费
+            if 'basic_salary' in context.user_data:
+                data['basic_salary'] = context.user_data['basic_salary']
+            if 'allowance' in context.user_data:
+                data['allowance'] = context.user_data['allowance']
+            if 'overtime' in context.user_data:
+                data['overtime'] = context.user_data['overtime']
+            
+            # 添加EPF相关数据
+            if context.user_data.get('epf_enabled', False):
+                data['epf_employee'] = context.user_data['epf_employee']
+                data['epf_employer'] = context.user_data['epf_employer']
+                data['epf_rate'] = context.user_data.get('employer_epf_rate', 13)
+            
+            # 添加SOCSO相关数据
+            if context.user_data.get('socso_enabled', False):
+                data['socso_employee'] = context.user_data['socso_employee']
+                data['socso_employer'] = context.user_data['socso_employer']
+            
+            # 添加净工资
+            if 'net_salary' in context.user_data:
+                data['net_salary'] = context.user_data['net_salary']
+            
+            # 添加雇主总成本
+            if 'total_employer_cost' in context.user_data:
+                data['total_cost'] = context.user_data['total_employer_cost']
+                
+            # 更新描述信息，包含EPF和SOCSO状态
+            epf_text = "EPF启用" if context.user_data.get('epf_enabled', False) else "EPF未启用"
+            socso_text = "SOCSO启用" if context.user_data.get('socso_enabled', False) else "SOCSO未启用"
+            data['description'] = f"{desc} ({epf_text}, {socso_text})"
+        
         sheets_manager.add_expense_record(data)
         
         # 构建成功消息
@@ -1280,10 +1318,43 @@ async def cost_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 """
         if cost_type == "Worker Salary" and worker:
             success_message += f"👷 <b>Worker:</b> {worker}\n"
+            
+            # 如果启用了EPF或SOCSO，显示详细信息
+            if context.user_data.get('epf_enabled', False) or context.user_data.get('socso_enabled', False):
+                basic_salary = context.user_data.get('basic_salary', 0)
+                allowance = context.user_data.get('allowance', 0)
+                overtime = context.user_data.get('overtime', 0)
+                
+                success_message += f"💰 <b>Basic Salary:</b> RM{basic_salary:,.2f}\n"
+                if allowance > 0:
+                    success_message += f"💵 <b>Allowance:</b> RM{allowance:,.2f}\n"
+                if overtime > 0:
+                    success_message += f"⏱️ <b>Overtime:</b> RM{overtime:,.2f}\n"
+                
+                if context.user_data.get('epf_enabled', False):
+                    epf_employee = context.user_data.get('epf_employee', 0)
+                    epf_employer = context.user_data.get('epf_employer', 0)
+                    employer_epf_rate = context.user_data.get('employer_epf_rate', 13)
+                    
+                    success_message += f"💼 <b>EPF (Employee 11%):</b> RM{epf_employee:,.2f}\n"
+                    success_message += f"🏢 <b>EPF (Employer {employer_epf_rate}%):</b> RM{epf_employer:,.2f}\n"
+                
+                if context.user_data.get('socso_enabled', False):
+                    socso_employee = context.user_data.get('socso_employee', 0)
+                    socso_employer = context.user_data.get('socso_employer', 0)
+                    
+                    success_message += f"🩺 <b>SOCSO (Employee 0.5%):</b> RM{socso_employee:,.2f}\n"
+                    success_message += f"🏢 <b>SOCSO (Employer 1.75%):</b> RM{socso_employer:,.2f}\n"
+                
+                net_salary = context.user_data.get('net_salary', 0)
+                success_message += f"🧾 <b>Net Salary:</b> RM{net_salary:,.2f}\n"
+            else:
+                success_message += f"💰 <b>Amount:</b> RM{amount:,.2f}\n"
         elif supplier:
             success_message += f"🏭 <b>Supplier:</b> {supplier}\n"
-            
-        success_message += f"💰 <b>Amount:</b> RM{amount:,.2f}\n"
+            success_message += f"💰 <b>Amount:</b> RM{amount:,.2f}\n"
+        else:
+            success_message += f"💰 <b>Amount:</b> RM{amount:,.2f}\n"
         
         if receipt_link:
             success_message += "📎 <b>Receipt:</b> Uploaded successfully\n"
@@ -1974,6 +2045,27 @@ def get_conversation_handlers():
                 CommandHandler("skip", lambda u, c: show_cost_confirmation(u, c))
             ],
             COST_CONFIRM: [
+                CallbackQueryHandler(cost_save_handler, pattern="^cost_save$")
+            ],
+            # 添加工资计算相关状态
+            WORKER_BASIC_SALARY: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, worker_basic_salary_handler)
+            ],
+            WORKER_ALLOWANCE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, worker_allowance_handler),
+                CallbackQueryHandler(skip_allowance_handler, pattern="^skip_allowance$")
+            ],
+            WORKER_OT: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, worker_overtime_handler),
+                CallbackQueryHandler(skip_overtime_handler, pattern="^skip_overtime$")
+            ],
+            WORKER_DEDUCTIONS: [
+                CallbackQueryHandler(worker_deductions_handler, pattern="^deductions_")
+            ],
+            WORKER_EPF_RATE: [
+                CallbackQueryHandler(worker_epf_rate_handler, pattern="^epf_rate_")
+            ],
+            WORKER_CONFIRM: [
                 CallbackQueryHandler(cost_save_handler, pattern="^cost_save$")
             ]
         },
@@ -2866,23 +2958,23 @@ async def worker_select_handler(update: Update, context: ContextTypes.DEFAULT_TY
         context.user_data['cost_worker'] = worker_name
         context.user_data['cost_desc'] = f"Salary for {worker_name}"  # 自动设置描述
         
-        # 显示金额输入界面
+        # 显示基本工资输入界面
         keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
-            f"👷 <b>Worker:</b> {worker_name}\n\n<b>Please enter salary amount:</b>",
+            f"👷 <b>Worker:</b> {worker_name}\n\n<b>Please enter basic salary amount:</b>",
             parse_mode=ParseMode.HTML,
             reply_markup=reply_markup
         )
         
-        return COST_AMOUNT
+        # 设置状态进入工资计算流程
+        return WORKER_BASIC_SALARY
     
     # 未知回调数据
     await query.edit_message_text("❌ Unknown operation, please try again.")
     return ConversationHandler.END
 
-# 添加自定义工作人员名称输入处理
 async def custom_worker_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """处理自定义工作人员名称输入"""
     # 检查是否正在等待自定义工作人员输入
@@ -2897,13 +2989,370 @@ async def custom_worker_handler(update: Update, context: ContextTypes.DEFAULT_TY
     # 清除等待标记
     context.user_data.pop('waiting_for_custom_worker', None)
     
-    # 显示金额输入界面
+    # 显示基本工资输入界面
     keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_html(
-        f"👷 <b>Worker:</b> {worker_name}\n\n<b>Please enter salary amount:</b>",
+        f"👷 <b>Worker:</b> {worker_name}\n\n<b>Please enter basic salary amount:</b>",
         reply_markup=reply_markup
     )
     
-    return COST_AMOUNT
+    return WORKER_BASIC_SALARY
+
+# ====================================
+# 工人薪资计算区 - 基本工资、津贴、加班、EPF/SOCSO
+# ====================================
+
+async def worker_basic_salary_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理工人基本工资输入"""
+    try:
+        basic_salary_text = update.message.text.strip()
+        # 检查金额格式并转换为浮点数
+        clean_amount = basic_salary_text.replace(',', '').replace('RM', '').replace('¥', '').replace('$', '').replace('€', '')
+        basic_salary = float(clean_amount)
+        
+        # 存储基本工资
+        context.user_data['basic_salary'] = basic_salary
+        
+        # 询问津贴
+        keyboard = [[InlineKeyboardButton("⏭️ Skip (0)", callback_data="skip_allowance")],
+                   [InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_html(
+            f"💰 <b>Basic Salary:</b> RM{basic_salary:,.2f}\n\n"
+            f"<b>Please enter allowance amount (if any):</b>",
+            reply_markup=reply_markup
+        )
+        
+        return WORKER_ALLOWANCE
+        
+    except ValueError:
+        # 金额格式不正确
+        await update.message.reply_text("⚠️ <b>Invalid amount format</b>\n\nPlease enter a valid number.", parse_mode=ParseMode.HTML)
+        return WORKER_BASIC_SALARY
+
+async def worker_allowance_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理工人津贴输入"""
+    try:
+        allowance_text = update.message.text.strip()
+        # 检查金额格式并转换为浮点数
+        clean_amount = allowance_text.replace(',', '').replace('RM', '').replace('¥', '').replace('$', '').replace('€', '')
+        allowance = float(clean_amount)
+        
+        # 存储津贴
+        context.user_data['allowance'] = allowance
+        
+        # 询问加班费
+        keyboard = [[InlineKeyboardButton("⏭️ Skip (0)", callback_data="skip_overtime")],
+                   [InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        basic_salary = context.user_data.get('basic_salary', 0)
+        
+        await update.message.reply_html(
+            f"💰 <b>Basic Salary:</b> RM{basic_salary:,.2f}\n"
+            f"💵 <b>Allowance:</b> RM{allowance:,.2f}\n\n"
+            f"<b>Please enter overtime amount (if any):</b>",
+            reply_markup=reply_markup
+        )
+        
+        return WORKER_OT
+        
+    except ValueError:
+        # 金额格式不正确
+        await update.message.reply_text("⚠️ <b>Invalid amount format</b>\n\nPlease enter a valid number.", parse_mode=ParseMode.HTML)
+        return WORKER_ALLOWANCE
+
+async def skip_allowance_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """跳过津贴输入"""
+    query = update.callback_query
+    await query.answer()
+    
+    # 设置津贴为0
+    context.user_data['allowance'] = 0
+    
+    # 询问加班费
+    keyboard = [[InlineKeyboardButton("⏭️ Skip (0)", callback_data="skip_overtime")],
+               [InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    basic_salary = context.user_data.get('basic_salary', 0)
+    
+    await query.edit_message_text(
+        f"💰 <b>Basic Salary:</b> RM{basic_salary:,.2f}\n"
+        f"💵 <b>Allowance:</b> RM0.00\n\n"
+        f"<b>Please enter overtime amount (if any):</b>",
+        parse_mode=ParseMode.HTML,
+        reply_markup=reply_markup
+    )
+    
+    return WORKER_OT
+
+async def worker_overtime_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理工人加班费输入"""
+    try:
+        overtime_text = update.message.text.strip()
+        # 检查金额格式并转换为浮点数
+        clean_amount = overtime_text.replace(',', '').replace('RM', '').replace('¥', '').replace('$', '').replace('€', '')
+        overtime = float(clean_amount)
+        
+        # 存储加班费
+        context.user_data['overtime'] = overtime
+        
+        # 进入扣除项选择界面
+        return await show_deductions_options(update, context)
+        
+    except ValueError:
+        # 金额格式不正确
+        await update.message.reply_text("⚠️ <b>Invalid amount format</b>\n\nPlease enter a valid number.", parse_mode=ParseMode.HTML)
+        return WORKER_OT
+
+async def skip_overtime_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """跳过加班费输入"""
+    query = update.callback_query
+    await query.answer()
+    
+    # 设置加班费为0
+    context.user_data['overtime'] = 0
+    
+    # 进入扣除项选择界面
+    return await show_deductions_options(update, context, from_callback=True)
+
+async def show_deductions_options(update: Update, context: ContextTypes.DEFAULT_TYPE, from_callback=False) -> int:
+    """显示法定扣除项选择界面"""
+    # 准备选择按钮
+    keyboard = [
+        [InlineKeyboardButton("✅ EPF + SOCSO", callback_data="deductions_both")],
+        [InlineKeyboardButton("💰 EPF Only", callback_data="deductions_epf")],
+        [InlineKeyboardButton("🩺 SOCSO Only", callback_data="deductions_socso")],
+        [InlineKeyboardButton("⏭️ No Deductions", callback_data="deductions_none")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # 获取已输入的薪资信息
+    basic_salary = context.user_data.get('basic_salary', 0)
+    allowance = context.user_data.get('allowance', 0)
+    overtime = context.user_data.get('overtime', 0)
+    
+    message = f"""
+👷 <b>WORKER SALARY DETAILS</b>
+
+💰 <b>Basic Salary:</b> RM{basic_salary:,.2f}
+💵 <b>Allowance:</b> RM{allowance:,.2f}
+⏱️ <b>Overtime:</b> RM{overtime:,.2f}
+
+<b>Please select statutory deductions:</b>
+- EPF: Employee 11%, Employer 13%
+- SOCSO: Employee 0.5%, Employer 1.75%
+"""
+    
+    if from_callback:
+        query = update.callback_query
+        await query.edit_message_text(
+            message,
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+    else:
+        await update.message.reply_html(
+            message,
+            reply_markup=reply_markup
+        )
+    
+    return WORKER_DEDUCTIONS
+
+async def worker_deductions_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理法定扣除项选择"""
+    query = update.callback_query
+    await query.answer()
+    
+    deduction_type = query.data.replace("deductions_", "")
+    
+    # 根据选择设置EPF和SOCSO启用状态
+    if deduction_type == "both":
+        context.user_data['epf_enabled'] = True
+        context.user_data['socso_enabled'] = True
+        
+        # 询问雇主EPF缴费比例
+        return await show_epf_rate_options(update, context)
+        
+    elif deduction_type == "epf":
+        context.user_data['epf_enabled'] = True
+        context.user_data['socso_enabled'] = False
+        
+        # 询问雇主EPF缴费比例
+        return await show_epf_rate_options(update, context)
+        
+    elif deduction_type == "socso":
+        context.user_data['epf_enabled'] = False
+        context.user_data['socso_enabled'] = True
+        
+        # 计算工资并跳到确认界面
+        return await calculate_and_show_salary_confirmation(update, context)
+        
+    elif deduction_type == "none":
+        context.user_data['epf_enabled'] = False
+        context.user_data['socso_enabled'] = False
+        
+        # 计算工资并跳到确认界面
+        return await calculate_and_show_salary_confirmation(update, context)
+    
+    # 未知选择，返回扣除项选择界面
+    await query.edit_message_text(
+        "⚠️ <b>Invalid selection</b>\n\nPlease select a valid option.",
+        parse_mode=ParseMode.HTML
+    )
+    return await show_deductions_options(update, context, from_callback=True)
+
+async def show_epf_rate_options(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """显示雇主EPF比例选择界面"""
+    query = update.callback_query
+    
+    keyboard = [
+        [InlineKeyboardButton("13%", callback_data="epf_rate_13")],
+        [InlineKeyboardButton("12%", callback_data="epf_rate_12")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # 获取已输入的薪资信息
+    basic_salary = context.user_data.get('basic_salary', 0)
+    
+    message = f"""
+👷 <b>EPF EMPLOYER CONTRIBUTION RATE</b>
+
+💰 <b>Basic Salary:</b> RM{basic_salary:,.2f}
+
+<b>Please select the EPF employer contribution rate:</b>
+- Standard rate: 13%
+- Alternative rate: 12%
+"""
+    
+    await query.edit_message_text(
+        message,
+        parse_mode=ParseMode.HTML,
+        reply_markup=reply_markup
+    )
+    
+    return WORKER_EPF_RATE
+
+async def worker_epf_rate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理雇主EPF比例选择"""
+    query = update.callback_query
+    await query.answer()
+    
+    rate_data = query.data.replace("epf_rate_", "")
+    
+    try:
+        employer_epf_rate = int(rate_data)
+        context.user_data['employer_epf_rate'] = employer_epf_rate
+        
+        # 计算工资并跳到确认界面
+        return await calculate_and_show_salary_confirmation(update, context)
+        
+    except ValueError:
+        # 比例格式不正确
+        await query.edit_message_text(
+            "⚠️ <b>Invalid rate</b>\n\nPlease select a valid option.",
+            parse_mode=ParseMode.HTML
+        )
+        return await show_epf_rate_options(update, context)
+
+async def calculate_and_show_salary_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """计算工资并显示确认界面"""
+    query = update.callback_query
+    
+    # 获取薪资信息
+    basic_salary = context.user_data.get('basic_salary', 0)
+    allowance = context.user_data.get('allowance', 0)
+    overtime = context.user_data.get('overtime', 0)
+    epf_enabled = context.user_data.get('epf_enabled', False)
+    socso_enabled = context.user_data.get('socso_enabled', False)
+    
+    # 计算EPF和SOCSO
+    epf_employee = 0
+    epf_employer = 0
+    socso_employee = 0
+    socso_employer = 0
+    
+    if epf_enabled:
+        # 员工EPF固定为11%
+        epf_employee = basic_salary * 0.11
+        
+        # 雇主EPF可能是12%或13%
+        employer_epf_rate = context.user_data.get('employer_epf_rate', 13) / 100
+        epf_employer = basic_salary * employer_epf_rate
+    
+    if socso_enabled:
+        # 员工SOCSO为0.5%
+        socso_employee = basic_salary * 0.005
+        
+        # 雇主SOCSO为1.75%
+        socso_employer = basic_salary * 0.0175
+    
+    # 计算净工资
+    net_salary = basic_salary + allowance + overtime - epf_employee - socso_employee
+    
+    # 存储计算结果
+    context.user_data['epf_employee'] = epf_employee
+    context.user_data['epf_employer'] = epf_employer
+    context.user_data['socso_employee'] = socso_employee
+    context.user_data['socso_employer'] = socso_employer
+    context.user_data['net_salary'] = net_salary
+    
+    # 总费用（包括雇主需要额外承担的部分）
+    total_employer_cost = basic_salary + allowance + overtime + epf_employer + socso_employer
+    context.user_data['total_employer_cost'] = total_employer_cost
+    
+    # 设置费用金额为净工资
+    context.user_data['cost_amount'] = net_salary
+    
+    # 显示确认界面
+    keyboard = [
+        [InlineKeyboardButton("✅ Save", callback_data="cost_save")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    worker_name = context.user_data.get('cost_worker', '')
+    
+    message = f"""
+👷 <b>WORKER SALARY CONFIRMATION</b>
+
+<b>Worker:</b> {worker_name}
+
+<b>Income:</b>
+💰 Basic Salary: RM{basic_salary:,.2f}
+💵 Allowance: RM{allowance:,.2f}
+⏱️ Overtime: RM{overtime:,.2f}
+
+<b>Statutory Deductions:</b>
+"""
+    
+    if epf_enabled:
+        employer_epf_rate = context.user_data.get('employer_epf_rate', 13)
+        message += f"💼 EPF (Employee 11%): RM{epf_employee:,.2f}\n"
+        message += f"🏢 EPF (Employer {employer_epf_rate}%): RM{epf_employer:,.2f}\n"
+    
+    if socso_enabled:
+        message += f"🩺 SOCSO (Employee 0.5%): RM{socso_employee:,.2f}\n"
+        message += f"🏢 SOCSO (Employer 1.75%): RM{socso_employer:,.2f}\n"
+    
+    message += f"""
+<b>Summary:</b>
+🧾 Net Salary: RM{net_salary:,.2f}
+💶 Total Employer Cost: RM{total_employer_cost:,.2f}
+
+<b>Please confirm the salary details:</b>
+"""
+    
+    await query.edit_message_text(
+        message,
+        parse_mode=ParseMode.HTML,
+        reply_markup=reply_markup
+    )
+    
+    return WORKER_CONFIRM
