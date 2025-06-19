@@ -57,8 +57,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     context.user_data.clear()
     
     keyboard = [
-        [InlineKeyboardButton("📊 Sale Invoice1", callback_data="sales_add")],
-        [InlineKeyboardButton("💵 Coastin2g", callback_data="menu_cost")],
+        [InlineKeyboardButton("📊 Sale Invoice", callback_data="sales_add")],
+        [InlineKeyboardButton("💵 Coasting", callback_data="menu_cost")],
         [InlineKeyboardButton("📈 Report", callback_data="menu_report")],
         [InlineKeyboardButton("⚙️ Setting", callback_data="menu_setting")],
         [InlineKeyboardButton("❓ Help", callback_data="menu_help")]
@@ -1520,11 +1520,33 @@ async def report_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         [InlineKeyboardButton("📊 当月报表", callback_data="report_current")],
         [InlineKeyboardButton("🗓️ 指定月份", callback_data="report_custom")],
         [InlineKeyboardButton("📈 年度汇总", callback_data="report_yearly")],
+        # 新增LHDN报表相关选项
+        [InlineKeyboardButton("📋 P&L 损益表", callback_data="report_pnl")],
+        [InlineKeyboardButton("👨‍💼 员工薪资汇总", callback_data="report_salary")],
+        [InlineKeyboardButton("💼 LHDN 税务摘要", callback_data="report_tax_summary")],
+        [InlineKeyboardButton("💾 导出报表至Google Sheet", callback_data="report_export")],
         [InlineKeyboardButton("🔙 返回主菜单", callback_data="back_main")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    message = "📈 *报表生成*\n\n请选择报表类型："
+    message = """
+📈 *报表中心*
+
+请选择需要的报表类型：
+
+基础报表：
+• 📊 当月报表 - 查看本月收支情况
+• 🗓️ 指定月份 - 查看指定月份的收支明细
+• 📈 年度汇总 - 生成全年财务概览
+
+马来西亚税务报表 (LHDN Form B):
+• 📋 P&L 损益表 - 符合LHDN Working Sheets格式
+• 👨‍💼 员工薪资汇总 - 含EPF/SOCSO明细
+• 💼 LHDN 税务摘要 - 按Form B最新结构生成
+
+导出功能：
+• 💾 导出报表至Google Sheet - 同步更新所有报表
+"""
     
     await update.callback_query.edit_message_text(
         message, 
@@ -1682,842 +1704,54 @@ async def report_yearly_handler(update: Update, context: ContextTypes.DEFAULT_TY
         await query.edit_message_text("❌ 生成报表失败，请重试")
 
 # ====================================
-# 回调处理区 - 所有 inline keyboard 回调
+# LHDN报表生成区 - 符合马来西亚税务要求
 # ====================================
 
-async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """统一处理所有回调查询"""
+async def report_pnl_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理P&L损益表请求"""
     query = update.callback_query
     await query.answer()
-    
-    # 主菜单回调
-    if query.data == "back_main":
-        try:
-            # 直接在当前消息上显示主菜单
-            keyboard = [
-                [InlineKeyboardButton("📊 Sale Invoice", callback_data="sales_add")],
-                [InlineKeyboardButton("💵 Coasting", callback_data="menu_cost")],
-                [InlineKeyboardButton("📈 Report", callback_data="menu_report")],
-                [InlineKeyboardButton("⚙️ Setting", callback_data="menu_setting")],
-                [InlineKeyboardButton("❓ Help", callback_data="menu_help")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            welcome_message = """
-🚀 *财务管理助手*
-
-👋 欢迎使用！请选择需要的功能：
-
-📊 *Sale Invoice* - 登记发票和佣金
-💵 *Coasting* - 记录各项支出
-📈 *Report* - 查看统计报告
-⚙️ *Setting* - 创建代理商/供应商
-            """
-            
-            await query.edit_message_text(
-                welcome_message, 
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=reply_markup
-            )
-            
-            # 清除用户数据
-            context.user_data.clear()
-            return ConversationHandler.END
-        except Exception as e:
-            logger.error(f"返回主菜单失败: {e}")
-            # 尝试发送错误消息
-            try:
-                keyboard = [[InlineKeyboardButton("🏠 返回主菜单", callback_data="back_main")]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                await query.edit_message_text(
-                    "❌ 系统出现错误，请稍后重试",
-                    reply_markup=reply_markup
-                )
-            except Exception as e2:
-                logger.error(f"发送错误消息失败: {e2}")
-            return ConversationHandler.END
-    
-    # 从费用录入界面创建供应商
-    elif query.data == "setting_create_supplier":
-        # 保存当前状态，以便稍后恢复
-        if 'cost_type' in context.user_data:
-            context.user_data['previous_state'] = 'cost'
-            
-        # 调用设置函数
-        context.user_data['setting_category'] = 'supplier'
-        keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            "🏭 <b>Create Supplier</b>\n\n<b>Please enter supplier name:</b>",
-            parse_mode=ParseMode.HTML,
-            reply_markup=reply_markup
-        )
-        return SETTING_NAME
-    
-    # 从费用录入界面创建工作人员
-    elif query.data == "setting_create_worker":
-        # 保存当前状态，以便稍后恢复
-        if 'cost_type' in context.user_data:
-            context.user_data['previous_state'] = 'cost'
-            
-        # 调用设置函数
-        context.user_data['setting_category'] = 'worker'
-        keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            "👷 <b>Create Worker</b>\n\n<b>Please enter worker name:</b>",
-            parse_mode=ParseMode.HTML,
-            reply_markup=reply_markup
-        )
-        return SETTING_NAME
-    
-    # 处理无操作的回调
-    elif query.data == "no_action":
-        # 不做任何操作，仅关闭回调
-        return
-    
-    # 各功能菜单回调
-    elif query.data == "menu_sales":
-        # 这里不做任何处理，因为menu_sales回调已经在ConversationHandler的entry_points中处理
-        # 只是为了防止出错，所以保留这个分支
-        logger.info("menu_sales回调被触发，但由ConversationHandler处理")
-        return ConversationHandler.END
-    elif query.data == "menu_cost":
-        return await cost_menu(update, context)
-    elif query.data == "menu_report":
-        return await report_menu(update, context)
-    elif query.data == "menu_setting":
-        # 这个回调现在由 setting_conversation 处理
-        logger.info("menu_setting 回调被触发，但由 setting_conversation 处理")
-        return ConversationHandler.END
-    elif query.data == "menu_help":
-        await help_command(update, context)
-        return ConversationHandler.END
-    
-    # 销售记录回调
-    elif query.data == "back_sales":
-        try:
-            # 清除PDF相关的用户数据
-            if 'sales_invoice_pdf' in context.user_data:
-                del context.user_data['sales_invoice_pdf']
-            
-            logger.info("处理back_sales回调")
-            return await sales_menu(update, context)
-        except Exception as e:
-            logger.error(f"处理back_sales回调失败: {e}")
-            # 如果sales_menu失败，返回主菜单
-            return await callback_query_handler(update, context)
-    elif query.data == "sales_list":
-        await sales_list_handler(update, context)
-        return ConversationHandler.END
-    elif query.data in ["client_company", "client_agent"]:
-        return await sales_client_handler(update, context)
-    elif query.data == "sales_save":
-        return await sales_save_handler(update, context)
-    elif query.data.startswith("pic_"):
-        return await sales_person_handler(update, context)
-    elif query.data.startswith("agent_"):
-        return await sales_agent_select_handler(update, context)
-    
-    # 费用管理回调
-    elif query.data == "back_cost":
-        # 检查是否从设置页面返回
-        if context.user_data.get('previous_state') == 'cost':
-            # 清除设置相关的数据
-            for key in list(context.user_data.keys()):
-                if key.startswith('setting_'):
-                    context.user_data.pop(key)
-            context.user_data.pop('previous_state', None)
-            
-            # 返回费用菜单
-            return await cost_menu(update, context)
-        else:
-            return await cost_menu(update, context)
-    elif query.data in ["cost_purchasing", "cost_billing", "cost_salary"]:
-        return await cost_type_handler(update, context)
-    elif query.data.startswith("billing_"):
-        return await cost_type_handler(update, context)
-    elif query.data == "cost_list":
-        await cost_list_handler(update, context)
-        return ConversationHandler.END
-    elif query.data.startswith("supplier_"):
-        return await cost_supplier_handler(update, context)
-    elif query.data.startswith("worker_"):
-        return await worker_select_handler(update, context)
-    elif query.data == "skip_receipt":
-        # 跳过收据上传，直接显示确认信息
-        return await show_cost_confirmation(update, context)
-    
-    # 报表生成回调
-    elif query.data == "back_report":
-        return await report_menu(update, context)
-    elif query.data == "report_current":
-        return await report_current_handler(update, context)
-    elif query.data == "report_custom":
-        return await report_custom_handler(update, context)
-    elif query.data == "report_yearly":
-        await report_yearly_handler(update, context)
-        return ConversationHandler.END
-    
-    # 默认返回主菜单
-    else:
-        await start_command(update, context)
-        return ConversationHandler.END
-
-# ====================================
-# 工具函数区 - 辅助功能
-# ====================================
-
-async def close_other_conversations(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """关闭其他进行中的会话，防止状态冲突"""
-    # 清除所有用户临时数据
-    context.user_data.clear()
-    
-    # 记录会话切换
-    logger.info(f"用户 {update.effective_user.id} 切换会话，清除临时数据")
-
-async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """处理未知命令"""
-    keyboard = [[InlineKeyboardButton("🏠 返回主菜单", callback_data="back_main")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await update.message.reply_text(
-        "❓ 未知命令，请使用菜单按钮进行操作",
-        reply_markup=reply_markup
-    )
-
-async def text_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """处理非命令文本消息"""
-    # 如果不在会话中，引导用户使用菜单
-    if not context.user_data:
-        keyboard = [[InlineKeyboardButton("🏠 主菜单", callback_data="back_main")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await update.message.reply_text(
-            "💡 请使用下方按钮进行操作",
-            reply_markup=reply_markup
-        )
-
-# ====================================
-# 错误处理区
-# ====================================
-
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """全局错误处理"""
-    logger.error(f"更新 {update} 引发错误 {context.error}")
-    
-    # 尝试发送错误消息给用户
-    try:
-        keyboard = [[InlineKeyboardButton("🏠 返回主菜单", callback_data="back_main")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        error_message = "❌ 系统出现错误，请稍后重试"
-        
-        if update.callback_query:
-            await update.callback_query.edit_message_text(
-                error_message,
-                reply_markup=reply_markup
-            )
-        elif update.message:
-            await update.message.reply_text(
-                error_message,
-                reply_markup=reply_markup
-            )
-    except Exception as e:
-        logger.error(f"发送错误消息失败: {e}")
-
-# ====================================
-# 会话状态管理区 - ConversationHandler 配置
-# ====================================
-
-# 定义全局对话处理器变量
-sales_conversation = None
-expenses_conversation = None
-report_conversation = None
-setting_conversation = None
-sales_callback_handler = callback_query_handler
-expenses_callback_handler = callback_query_handler
-report_callback_handler = callback_query_handler
-close_session_handler = callback_query_handler
-general_callback_handler = callback_query_handler
-
-def get_conversation_handlers():
-    """获取所有会话处理器配置"""
-    
-    global sales_conversation, expenses_conversation, report_conversation, setting_conversation
-    
-    # 系统设置会话处理器
-    setting_conversation = ConversationHandler(
-        entry_points=[
-            CallbackQueryHandler(setting_category_handler, pattern="^setting_create_"),
-            CommandHandler("Setting", setting_command),
-            # 添加菜单入口点 - 使用专门的处理函数
-            CallbackQueryHandler(menu_setting_handler, pattern="^menu_setting$")
-        ],
-        states={
-            SETTING_CATEGORY: [CallbackQueryHandler(setting_category_handler, pattern="^setting_create_")],
-            SETTING_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, setting_name_handler)],
-            SETTING_IC: [MessageHandler(filters.TEXT & ~filters.COMMAND, setting_ic_handler)],
-            SETTING_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, setting_type_handler)],
-            SETTING_RATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, setting_rate_handler)]
-        },
-        fallbacks=[
-            CallbackQueryHandler(callback_query_handler),
-            CommandHandler("cancel", cancel_command)
-        ],
-        name="setting_conversation",
-        persistent=False
-    )
-    
-    # 销售记录会话处理器
-    sales_conversation = ConversationHandler(
-        entry_points=[
-            CallbackQueryHandler(sale_invoice_command, pattern="^sales_add$"),
-            CommandHandler("SaleInvoice", sale_invoice_command),
-            # 添加菜单入口点
-            CallbackQueryHandler(lambda u, c: sale_invoice_command(u, c), pattern="^menu_sales$")
-        ],
-        states={
-            SALES_PERSON: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, sales_person_handler),
-                CallbackQueryHandler(sales_person_handler, pattern="^pic_")
-            ],
-            SALES_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, sales_amount_handler)],
-            SALES_BILL_TO: [MessageHandler(filters.TEXT & ~filters.COMMAND, sales_bill_to_handler)],
-            SALES_CLIENT: [CallbackQueryHandler(sales_client_handler, pattern="^client_")],
-            SALES_COMMISSION_TYPE: [
-                CallbackQueryHandler(sales_commission_type_handler, pattern="^commission_"),
-                CallbackQueryHandler(use_default_commission_handler, pattern="^use_default_commission_")
-            ],
-            SALES_COMMISSION_PERCENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, sales_commission_percent_handler)],
-            SALES_COMMISSION_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, sales_commission_amount_handler)],
-            SALES_AGENT_SELECT: [CallbackQueryHandler(sales_agent_select_handler, pattern="^agent_")],
-            SALES_CONFIRM: [
-                CallbackQueryHandler(sales_save_handler, pattern="^sales_save$"),
-                CallbackQueryHandler(upload_invoice_pdf_prompt, pattern="^upload_invoice_pdf$"),
-                CallbackQueryHandler(callback_query_handler, pattern="^back_main$")
-            ],
-            SALES_INVOICE_PDF: [
-                MessageHandler(filters.Document.ALL, sales_invoice_pdf_handler),
-                CallbackQueryHandler(lambda u, c: show_sales_confirmation(u, c), pattern="^skip_invoice_pdf$"),
-                CallbackQueryHandler(lambda u, c: callback_query_handler(u, c), pattern="^back_sales$")
-            ]
-        },
-        fallbacks=[
-            CallbackQueryHandler(callback_query_handler),
-            CommandHandler("cancel", cancel_command)
-        ],
-        name="sales_conversation",
-        persistent=False
-    )
-    
-    # 费用管理会话处理器
-    expenses_conversation = ConversationHandler(
-        entry_points=[
-            CallbackQueryHandler(cost_type_handler, pattern="^cost_purchasing$|^cost_billing$|^cost_salary$"),
-            CallbackQueryHandler(cost_menu, pattern="^menu_cost$"),
-            CallbackQueryHandler(cost_list_handler, pattern="^cost_list$")
-        ],
-        states={
-            COST_TYPE: [
-                CallbackQueryHandler(cost_type_handler, pattern="^cost_|^billing_")
-            ],
-            COST_SUPPLIER: [
-                CallbackQueryHandler(cost_supplier_handler, pattern="^supplier_"),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, custom_supplier_handler)
-            ],
-            COST_WORKER: [
-                CallbackQueryHandler(worker_select_handler, pattern="^worker_"),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, custom_worker_handler)
-            ],
-            COST_AMOUNT: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, cost_amount_handler)
-            ],
-            COST_DESC: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, cost_desc_handler)
-            ],
-            COST_RECEIPT: [
-                MessageHandler(filters.PHOTO | filters.Document.ALL, cost_receipt_handler),
-                CallbackQueryHandler(lambda u, c: show_cost_confirmation(u, c), pattern="^skip_receipt$"),
-                CallbackQueryHandler(receipt_upload_prompt, pattern="^upload_receipt$"),
-                CommandHandler("skip", lambda u, c: show_cost_confirmation(u, c))
-            ],
-            COST_CONFIRM: [
-                CallbackQueryHandler(cost_save_handler, pattern="^cost_save$")
-            ],
-            # 添加工资计算相关状态
-            WORKER_BASIC_SALARY: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, worker_basic_salary_handler)
-            ],
-            WORKER_ALLOWANCE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, worker_allowance_handler),
-                CallbackQueryHandler(skip_allowance_handler, pattern="^skip_allowance$")
-            ],
-            WORKER_OT: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, worker_overtime_handler),
-                CallbackQueryHandler(skip_overtime_handler, pattern="^skip_overtime$")
-            ],
-            WORKER_DEDUCTIONS: [
-                CallbackQueryHandler(worker_deductions_handler, pattern="^deductions_")
-            ],
-            WORKER_EPF_RATE: [
-                CallbackQueryHandler(worker_epf_rate_handler, pattern="^epf_rate_")
-            ],
-            WORKER_CONFIRM: [
-                CallbackQueryHandler(cost_save_handler, pattern="^cost_save$")
-            ]
-        },
-        fallbacks=[
-            CallbackQueryHandler(lambda u, c: cost_menu(u, c), pattern="^back_cost$"),
-            CallbackQueryHandler(callback_query_handler, pattern="^back_main$"),
-            CommandHandler("cancel", cancel_command)
-        ],
-        name="cost_conversation",
-        persistent=False
-    )
-    
-    # 报表生成会话处理器
-    report_conversation = ConversationHandler(
-        entry_points=[
-            CallbackQueryHandler(report_custom_handler, pattern="^report_custom$")
-        ],
-        states={
-            REPORT_TYPE: [CallbackQueryHandler(callback_query_handler, pattern="^report_")],
-            REPORT_MONTH: [MessageHandler(filters.TEXT & ~filters.COMMAND, report_month_handler)]
-        },
-        fallbacks=[
-            CallbackQueryHandler(callback_query_handler),
-            CommandHandler("cancel", cancel_command)
-        ],
-        name="report_conversation",
-        persistent=False
-    )
-    
-    return [sales_conversation, expenses_conversation, report_conversation, setting_conversation]
-
-# ====================================
-# 主处理器注册函数
-# ====================================
-
-def register_handlers(application):
-    """注册所有处理器到应用程序"""
-    
-    # 初始化对话处理器
-    get_conversation_handlers()
-    
-    # 添加会话处理器
-    for conversation in [sales_conversation, expenses_conversation, report_conversation, setting_conversation]:
-        if conversation:
-            application.add_handler(conversation)
-    
-    # 基础命令处理器
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("cancel", cancel_command))
-    application.add_handler(CommandHandler("Setting", setting_command))
-    application.add_handler(CommandHandler("SaleInvoice", sale_invoice_command))
-    
-    # 回调查询处理器 (放在会话处理器之后)
-    application.add_handler(CallbackQueryHandler(sales_callback_handler, pattern='^sales_'))
-    application.add_handler(CallbackQueryHandler(expenses_callback_handler, pattern='^(cost_|expenses_)'))
-    application.add_handler(CallbackQueryHandler(report_callback_handler, pattern='^report_'))
-    application.add_handler(CallbackQueryHandler(close_session_handler, pattern='^close_session$'))
-    application.add_handler(CallbackQueryHandler(general_callback_handler))
-    
-    # 文本消息处理器
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_message_handler))
-    
-    # 未知命令处理器
-    application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
-    
-    # 错误处理器
-    application.add_error_handler(error_handler)
-    
-    logger.info("所有处理器已成功注册")
-
-async def setting_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理 /Setting 命令 - 系统设置直接命令"""
-    # 清除用户数据
-    context.user_data.clear()
-    
-    keyboard = [
-        [InlineKeyboardButton("👨‍💼  Create Agent", callback_data="setting_create_agent")],
-        [InlineKeyboardButton("🏭  Create Supplier", callback_data="setting_create_supplier")],
-        [InlineKeyboardButton("👷  Create Worker", callback_data="setting_create_worker")],
-        [InlineKeyboardButton("👑  Create Person in Charge", callback_data="setting_create_pic")],
-        [InlineKeyboardButton("🔙  Back to Main Menu", callback_data="back_main")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await update.message.reply_text(
-        "⚙️ <b>SYSTEM SETTINGS</b>\n\n<b>Please select what to create:</b>",
-        parse_mode=ParseMode.HTML,
-        reply_markup=reply_markup
-    )
-    return SETTING_CATEGORY
-
-async def setting_category_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理设置类别选择"""
-    query = update.callback_query
-    await query.answer()
-    
-    category_data = query.data.replace("setting_create_", "")
-    context.user_data['setting_category'] = category_data
-    
-    category_names = {
-        "agent": "Agent",
-        "supplier": "Supplier",
-        "worker": "Worker",
-        "pic": "Person in Charge"
-    }
-    
-    category_emojis = {
-        "agent": "👨‍💼",
-        "supplier": "🏭",
-        "worker": "👷",
-        "pic": "👑"
-    }
-    
-    category_name = category_names.get(category_data, "Item")
-    category_emoji = category_emojis.get(category_data, "➕")
-    
-    keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_main")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
-        f"{category_emoji} <b>Create {category_name}</b>\n\n<b>Please enter a name:</b>",
-        parse_mode=ParseMode.HTML,
-        reply_markup=reply_markup
+        "⏳ 正在生成P&L损益表，请稍候...",
+        parse_mode=ParseMode.HTML
     )
-    return SETTING_NAME
-
-async def setting_name_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理名称输入"""
-    name = update.message.text.strip()
-    context.user_data['setting_name'] = name
-    
-    category = context.user_data.get('setting_category')
-    
-    keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_main")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    category_emojis = {
-        "agent": "👨‍💼",
-        "supplier": "🏭",
-        "worker": "👷",
-        "pic": "👑"
-    }
-    emoji = category_emojis.get(category, "➕")
-    
-    if category == "agent":
-        await update.message.reply_text(
-            f"{emoji} *Name:* {name}\n\n*Please enter IC number:*",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=reply_markup
-        )
-        return SETTING_IC
-    elif category == "supplier":
-        await update.message.reply_text(
-            f"{emoji} *Name:* {name}\n\n*Please enter supplier category:*",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=reply_markup
-        )
-        return SETTING_TYPE
-    else:
-        # 对于工作人员和负责人，直接保存
-        try:
-            sheets_manager = SheetsManager()
-            category_names = {
-                "worker": "Worker",
-                "pic": "Person in Charge"
-            }
-            category_name = category_names.get(category, "Item")
-            
-            # 创建一个简单的数据结构，类似于其他添加方法
-            setting_data = {
-                'name': name,
-                'status': '激活'
-            }
-            
-            # 使用已有的方法添加数据
-            if category == "worker":
-                sheets_manager.add_worker(setting_data)
-            else:  # pic
-                sheets_manager.add_pic(setting_data)
-            
-            keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="back_main")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await update.message.reply_text(
-                f"✅ {category_name} \"{name}\" has been successfully added!",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=reply_markup
-            )
-            
-        except Exception as e:
-            logger.error(f"添加{category}失败: {e}")
-            await update.message.reply_text("❌ 添加失败，请重试")
-        
-        return ConversationHandler.END
-
-async def setting_ic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理IC号码输入"""
-    ic = update.message.text.strip()
-    name = context.user_data.get('setting_name')
     
     try:
+        # 获取当前年份
+        current_year = datetime.now().year
+        
+        # 生成P&L报表
         sheets_manager = SheetsManager()
+        pnl_data = sheets_manager.generate_pnl_report(current_year)
         
-        # 添加代理商，包含IC号码
-        agent_data = {
-            'name': name,
-            'ic': ic,    # IC号码
-            'phone': ''  # 电话（可选）
-        }
-        
-        sheets_manager.add_agent(agent_data)
-        
-        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="back_main")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await update.message.reply_text(
-            f"✅ Agent \"{name}\" (IC: {ic}) has been successfully added!",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=reply_markup
-        )
-        
-    except Exception as e:
-        logger.error(f"添加代理商失败: {e}")
-        await update.message.reply_text("❌ Failed to add. Please try again.")
-    
-    context.user_data.clear()
-    return ConversationHandler.END
+        # 构建报表消息
+        message = f"""
+📋 <b>P&L 损益表 ({current_year}年度)</b>
+<i>符合LHDN Working Sheets格式</i>
 
-async def setting_type_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理类型输入"""
-    type_value = update.message.text.strip()
-    context.user_data['setting_type'] = type_value
-    
-    category = context.user_data.get('setting_category')
-    name = context.user_data.get('setting_name')
-    ic = context.user_data.get('setting_ic', '')
-    
-    # 如果是代理商，需要输入佣金比例
-    if category == "agent":
-        keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_main")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await update.message.reply_html(
-            f"👨‍💼 <b>Name:</b> {name}\n<b>IC:</b> {ic}\n<b>Type:</b> {type_value}\n\n<b>Please enter commission rate (e.g. 5%):</b>",
-            reply_markup=reply_markup
-        )
-        return SETTING_RATE
-    
-    # 其他类型，直接保存
-    try:
-        sheets_manager = SheetsManager()
-        
-        if category == "supplier":
-            data = {
-                'name': name,
-                'contact': ic,
-                'phone': '',
-                'email': '',
-                'products': type_value,
-                'status': '激活'
-            }
-            sheets_manager.add_supplier(data)
-        elif category == "worker":
-            data = {
-                'name': name,
-                'contact': ic,
-                'phone': '',
-                'position': type_value,
-                'status': '激活'
-            }
-            sheets_manager.add_worker(data)
-        elif category == "pic":
-            data = {
-                'name': name,
-                'contact': ic,
-                'phone': '',
-                'department': type_value,
-                'status': '激活'
-            }
-            sheets_manager.add_pic(data)
-        
-        # 显示成功消息
-        category_names = {
-            "agent": "Agent",
-            "supplier": "Supplier",
-            "worker": "Worker",
-            "pic": "Person in Charge"
-        }
-        
-        category_emojis = {
-            "agent": "👨‍💼",
-            "supplier": "🏭",
-            "worker": "👷",
-            "pic": "👑"
-        }
-        
-        emoji = category_emojis.get(category, "➕")
-        category_name = category_names.get(category, "Item")
-        
-        success_message = f"{emoji} <b>{category_name} created successfully!</b>\n\n"
-        success_message += f"<b>Name:</b> {name}\n"
-        
-        if ic:
-            success_message += f"<b>IC/Contact:</b> {ic}\n"
-        if type_value:
-            success_message += f"<b>Type:</b> {type_value}\n"
-        
-        keyboard = [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="back_main")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await update.message.reply_html(
-            success_message,
-            reply_markup=reply_markup
-        )
-        
-        # 清除用户数据
-        context.user_data.clear()
-        return ConversationHandler.END
-        
-    except Exception as e:
-        logger.error(f"保存设置失败: {e}")
-        await update.message.reply_text("❌ <b>Failed to save</b>\n\nPlease try again later.", parse_mode=ParseMode.HTML)
-        return ConversationHandler.END
+<b>收入:</b>
+• 总销售额: RM{pnl_data['sales_revenue']:,.2f}
+• 佣金支出: RM{pnl_data['commission']:,.2f}
+• 毛利润: RM{pnl_data['gross_profit']:,.2f}
 
-async def sale_invoice_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理 /SaleInvoice 命令或 menu_sales 回调 - 直接开始添加销售记录"""
-    # 清除用户数据
-    context.user_data.clear()
-    
-    # 判断是命令还是回调查询
-    is_callback = update.callback_query is not None
-    
-    try:
-        # 获取负责人列表
-        sheets_manager = SheetsManager()
-        pics = sheets_manager.get_pics(active_only=True)
-        
-        if not pics:
-            # 如果没有负责人数据，显示提示信息
-            keyboard = [[InlineKeyboardButton("⚙️ 创建负责人", callback_data="setting_create_pic")],
-                        [InlineKeyboardButton("❌ 取消", callback_data="back_main")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            message = "⚠️ <b>未找到负责人数据</b>\n\n请先创建负责人后再使用此功能。"
-            
-            if is_callback:
-                await update.callback_query.edit_message_text(
-                    message,
-                    parse_mode=ParseMode.HTML,
-                    reply_markup=reply_markup
-                )
-            else:
-                await update.message.reply_text(
-                    message,
-                    parse_mode=ParseMode.HTML,
-                    reply_markup=reply_markup
-                )
-            return ConversationHandler.END
-            
-        # 创建负责人选择按钮
-        keyboard = []
-        for pic in pics:
-            # 使用姓名作为按钮文本，兼容'姓名'和'name'字段
-            name = pic.get('姓名', pic.get('name', ''))
-            if name:
-                keyboard.append([InlineKeyboardButton(f"👤 {name}", callback_data=f"pic_{name}")])
-        
-        # 添加取消按钮
-        keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="back_main")])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        message = "👤 <b>Select Person in Charge:</b>"
-        
-        if is_callback:
-            await update.callback_query.edit_message_text(
-                message,
-                parse_mode=ParseMode.HTML,
-                reply_markup=reply_markup
-            )
-        else:
-            await update.message.reply_text(
-                message,
-                parse_mode=ParseMode.HTML,
-                reply_markup=reply_markup
-            )
-        
-        logger.info("已显示负责人选择界面")
-        # 返回的是新的状态，因为我们需要一个回调来处理选择
-        return SALES_PERSON
-        
-    except Exception as e:
-        logger.error(f"获取负责人列表失败: {e}")
-        error_message = "❌ <b>Failed to get person in charge data</b>\n\nPlease try again later."
-        
-        if is_callback:
-            await update.callback_query.edit_message_text(
-                error_message,
-                parse_mode=ParseMode.HTML
-            )
-        else:
-            await update.message.reply_text(
-                error_message,
-                parse_mode=ParseMode.HTML
-            )
-        return ConversationHandler.END
+<b>费用 (LHDN分类):</b>
+• 折旧 (Depreciation): RM{pnl_data['depreciation']:,.2f}
+• 自身薪资/津贴 (Own salary/allowance): RM{pnl_data['own_salary_allowance']:,.2f}
+• 娱乐费用 (Entertainment): RM{pnl_data['entertainment']:,.2f}
+• 礼品支出 (Gifts): RM{pnl_data['gifts']:,.2f}
+• 罚款支出 (Penalties/fines): RM{pnl_data['penalties_fines']:,.2f}
+• 其他费用 (Other expenses): RM{pnl_data['other_expenses']:,.2f}
 
-async def cost_list_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """查看费用记录"""
-    query = update.callback_query
-    await query.answer()
-    
-    try:
-        sheets_manager = SheetsManager()
-        # 获取最近的费用记录
-        expense_records = sheets_manager.get_expense_records(month=None)
+<b>盈亏分析:</b>
+• 总费用支出: RM{pnl_data['total_expenses']:,.2f}
+• 净利润 (税前): RM{pnl_data['net_profit']:,.2f}
+
+<i>注：此报表按照马来西亚LHDN税务要求格式生成</i>
+"""
         
-        if not expense_records:
-            message = "📋 <b>No expense records found</b>"
-        else:
-            # 表头映射
-            header_mapping = {
-                '日期': 'date',
-                '费用类型': 'type',
-                '供应商': 'supplier',
-                '金额': 'amount',
-                '类别': 'category',
-                '备注': 'description'
-            }
-            
-            # 转换记录中的键名
-            converted_records = []
-            for record in expense_records:
-                converted_record = {}
-                for zh_key, en_key in header_mapping.items():
-                    if zh_key in record:
-                        converted_record[en_key] = record[zh_key]
-                converted_records.append(converted_record)
-            
-            # 只显示最近10条记录
-            recent_records = converted_records[:10]
-            message = "📋 <b>RECENT EXPENSE RECORDS</b>\n\n"
-            for record in recent_records:
-                message += f"📅 <b>Date:</b> {record.get('date', 'N/A')}\n"
-                message += f"📋 <b>Type:</b> {record.get('type', 'N/A')} | 💰 <b>Amount:</b> RM{float(record.get('amount', 0)):,.2f}\n"
-                if record.get('supplier'):
-                    message += f"🏭 <b>Supplier:</b> {record.get('supplier')}\n"
-                if record.get('description'):
-                    message += f"📝 <b>Description:</b> {record.get('description')}\n"
-                message += "\n"
-        
-        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="menu_cost")]]
+        # 添加返回按钮
+        keyboard = [[InlineKeyboardButton("🔙 返回报表中心", callback_data="menu_report")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
@@ -2527,452 +1761,338 @@ async def cost_list_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         
     except Exception as e:
-        logger.error(f"获取费用记录失败: {e}")
-        await query.edit_message_text(
-            "❌ <b>Failed to get expense records</b>\n\nPlease try again later.",
-            parse_mode=ParseMode.HTML
-        )
-
-async def setting_rate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理代理商佣金比例输入"""
-    rate_input = update.message.text.strip()
-    
-    try:
-        # 尝试将输入转换为浮点数
-        rate = float(rate_input.replace('%', '')) / 100
-        if rate < 0 or rate > 1:
-            await update.message.reply_text("⚠️ <b>Invalid rate</b>\n\nPlease enter a percentage between 0-100%.", parse_mode=ParseMode.HTML)
-            return SETTING_RATE
-            
-        context.user_data['setting_rate'] = rate
+        logger.error(f"生成P&L损益表失败: {e}")
         
-        # 获取之前收集的数据
-        category = context.user_data.get('setting_category')
-        name = context.user_data.get('setting_name')
-        ic = context.user_data.get('setting_ic', '')
-        type_value = context.user_data.get('setting_type', '')
-        
-        # 保存到Google Sheets
-        try:
-            sheets_manager = SheetsManager()
-            
-            if category == "agent":
-                data = {
-                    'name': name,
-                    'contact': ic,
-                    'phone': '',
-                    'email': '',
-                    'commission_rate': rate,
-                    'status': '激活'
-                }
-                sheets_manager.add_agent(data)
-            
-            # 显示成功消息
-            category_names = {
-                "agent": "Agent",
-                "supplier": "Supplier",
-                "worker": "Worker",
-                "pic": "Person in Charge"
-            }
-            
-            category_emojis = {
-                "agent": "👨‍💼",
-                "supplier": "🏭",
-                "worker": "👷",
-                "pic": "👑"
-            }
-            
-            emoji = category_emojis.get(category, "➕")
-            category_name = category_names.get(category, "Item")
-            
-            success_message = f"{emoji} <b>{category_name} created successfully!</b>\n\n"
-            success_message += f"<b>Name:</b> {name}\n"
-            
-            if ic:
-                success_message += f"<b>IC/Contact:</b> {ic}\n"
-            if type_value:
-                success_message += f"<b>Type:</b> {type_value}\n"
-            if rate:
-                success_message += f"<b>Commission Rate:</b> {rate*100:.1f}%\n"
-            
-            keyboard = [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="back_main")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await update.message.reply_html(
-                success_message,
-                reply_markup=reply_markup
-            )
-            
-            # 清除用户数据
-            context.user_data.clear()
-            return ConversationHandler.END
-            
-        except Exception as e:
-            logger.error(f"保存设置失败: {e}")
-            await update.message.reply_text("❌ <b>Failed to save</b>\n\nPlease try again later.", parse_mode=ParseMode.HTML)
-            return ConversationHandler.END
-            
-    except ValueError:
-        await update.message.reply_text("⚠️ <b>Invalid format</b>\n\nPlease enter a valid percentage (e.g. 5 or 5%).", parse_mode=ParseMode.HTML)
-        return SETTING_RATE
-
-async def sales_agent_select_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理代理商选择"""
-    query = update.callback_query
-    await query.answer()
-    
-    agent_data = query.data
-    if agent_data.startswith("agent_"):
-        # 解析代理商数据 agent_{name}_{ic}_{commission}
-        parts = agent_data[6:].split('_')
-        if len(parts) >= 1:
-            agent_name = parts[0]
-            context.user_data['sales_agent'] = agent_name
-            
-            # 保存代理商IC（如果有）
-            if len(parts) >= 2:
-                agent_ic = parts[1]
-                context.user_data['agent_ic'] = agent_ic
-            
-            # 获取代理商默认佣金比例（如果有）
-            default_commission = ""
-            default_commission_rate = 0
-            if len(parts) >= 3:
-                try:
-                    # 尝试将佣金比例转换为数字
-                    commission_str = parts[2]
-                    # 处理可能的百分比字符串
-                    if isinstance(commission_str, str) and '%' in commission_str:
-                        default_commission_rate = float(commission_str.replace('%', '')) / 100
-                    else:
-                        default_commission_rate = float(commission_str)
-                    
-                    # 格式化显示
-                    default_commission = f"{default_commission_rate*100:.1f}%"
-                except (ValueError, TypeError):
-                    logger.error(f"无法解析佣金比例: {parts[2]}")
-                    default_commission = parts[2]
-            
-            # 显示佣金计算方式选择界面
-            amount = context.user_data['sales_amount']
-            
-            # 如果有默认佣金比例，预先计算佣金金额
-            default_commission_amount = ""
-            if default_commission_rate > 0:
-                commission_amount = amount * default_commission_rate
-                default_commission_amount = f"💵 <b>Default Commission Amount:</b> RM{commission_amount:,.2f}"
-            
-            keyboard = [
-                [InlineKeyboardButton("💯 Set Commission Percentage", callback_data="commission_percent")],
-                [InlineKeyboardButton("💰 Enter Fixed Commission Amount", callback_data="commission_amount")],
-                [InlineKeyboardButton("❌ Cancel", callback_data="back_main")]
-            ]
-            
-            # 如果有默认佣金比例，添加使用默认佣金的按钮
-            if default_commission_rate > 0:
-                keyboard.insert(0, [InlineKeyboardButton(f"✅ Use Default Rate ({default_commission})", 
-                                                       callback_data=f"use_default_commission_{default_commission_rate}")])
-            
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            message = f"""
-🤝 <b>Agent:</b> {agent_name}
-"""
-            if context.user_data.get('agent_ic'):
-                message += f"🪪 <b>IC:</b> {context.user_data['agent_ic']}\n"
-                
-            message += f"""
-💰 <b>Amount:</b> RM{amount:,.2f}
-{f"💵 <b>Default Commission Rate:</b> {default_commission}" if default_commission else ""}
-{default_commission_amount if default_commission_amount else ""}
-
-<b>Please select commission calculation method:</b>
-"""
-            
-            await query.edit_message_text(
-                message,
-                parse_mode=ParseMode.HTML,
-                reply_markup=reply_markup
-            )
-            
-            # 返回佣金计算方式选择状态
-            return SALES_COMMISSION_TYPE
-    
-    # 未知回调数据
-    await query.edit_message_text("❌ Unknown operation, please start again")
-    return ConversationHandler.END
-
-async def receipt_upload_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """提示用户上传收据"""
-    query = update.callback_query
-    await query.answer()
-    
-    # 提示用户上传收据
-    keyboard = [
-        [InlineKeyboardButton("⏭️ Skip", callback_data="skip_receipt")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(
-        "📸 <b>Upload Receipt</b>\n\n"
-        "Please upload a photo or document of the receipt.\n"
-        "Or click 'Skip' to continue without a receipt.",
-        parse_mode=ParseMode.HTML,
-        reply_markup=reply_markup
-    )
-    
-    return COST_RECEIPT
-
-# 添加一个新函数用于处理菜单回调
-async def menu_setting_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理从主菜单进入Setting的回调"""
-    query = update.callback_query
-    await query.answer()
-    
-    # 清除用户数据
-    context.user_data.clear()
-    
-    keyboard = [
-        [InlineKeyboardButton("👨‍💼  Create Agent", callback_data="setting_create_agent")],
-        [InlineKeyboardButton("🏭  Create Supplier", callback_data="setting_create_supplier")],
-        [InlineKeyboardButton("👷  Create Worker", callback_data="setting_create_worker")],
-        [InlineKeyboardButton("👑  Create Person in Charge", callback_data="setting_create_pic")],
-        [InlineKeyboardButton("🔙  Back to Main Menu", callback_data="back_main")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(
-        "⚙️ <b>SYSTEM SETTINGS</b>\n\n<b>Please select what to create:</b>",
-        parse_mode=ParseMode.HTML,
-        reply_markup=reply_markup
-    )
-    return SETTING_CATEGORY
-
-async def use_default_commission_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理使用默认佣金比例的回调"""
-    query = update.callback_query
-    await query.answer()
-    
-    # 从回调数据中提取佣金比例
-    # 格式: use_default_commission_{rate}
-    try:
-        rate_str = query.data.replace("use_default_commission_", "")
-        rate = float(rate_str)
-        
-        # 计算佣金
-        amount = context.user_data['sales_amount']
-        commission = amount * rate
-        
-        # 保存数据
-        context.user_data['commission_rate'] = rate
-        context.user_data['sales_commission'] = commission
-        context.user_data['commission_type'] = 'default'
-        
-        # 跳转到确认界面
-        return await show_sales_confirmation(update, context)
-        
-    except ValueError as e:
-        logger.error(f"解析默认佣金比例失败: {e}")
-        await query.edit_message_text(
-            "❌ <b>Error processing commission rate</b>\n\nPlease try again.",
-            parse_mode=ParseMode.HTML
-        )
-        return ConversationHandler.END
-
-async def upload_invoice_pdf_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """提示用户上传发票PDF"""
-    query = update.callback_query
-    await query.answer()
-    
-    # 提示用户上传PDF文件
-    keyboard = [
-        [InlineKeyboardButton("⏭️ Skip", callback_data="skip_invoice_pdf")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="back_sales")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    # 使用reply_text而不是edit_message_text，避免可能的空消息错误
-    try:
-        await query.edit_message_text(
-            "📄 <b>Upload Invoice PDF</b>\n\n"
-            "Please upload a PDF file of the invoice.\n"
-            "Or click 'Skip' to continue without uploading.",
-            parse_mode=ParseMode.HTML,
-            reply_markup=reply_markup
-        )
-    except Exception as e:
-        logger.error(f"编辑消息失败: {e}")
-        # 如果编辑失败，尝试发送新消息
-        await query.message.reply_html(
-            "📄 <b>Upload Invoice PDF</b>\n\n"
-            "Please upload a PDF file of the invoice.\n"
-            "Or click 'Skip' to continue without uploading.",
-            reply_markup=reply_markup
-        )
-    
-    logger.info("已显示PDF上传提示")
-    return SALES_INVOICE_PDF
-
-async def sales_invoice_pdf_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理发票PDF上传"""
-    try:
-        logger.info("开始处理PDF上传...")
-        
-        # 确保只处理文档消息（移除不必要的条件判断）
-        if not update.message.document:
-            logger.warning("未接收到文档文件，但继续尝试处理")
-            
-        # 获取文档对象（即使不是PDF也尝试处理）
-        document = update.message.document or update.message.effective_attachment
-        file_id = document.file_id
-        file_name = document.file_name or f"invoice_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-        
-        logger.info(f"开始处理文件上传: {file_name}")  # 确保日志输出
-        
-        # 强制初始化Google Drive上传器
-        from google_drive_uploader import get_drive_uploader
-        drive_uploader = get_drive_uploader()
-        logger.info(f"Google Drive上传器已初始化: {drive_uploader is not None}")
-        
-        # 获取文件对象
-        file = await context.bot.get_file(file_id)
-        logger.info(f"获取文件成功: {file.file_path}")
-        
-        # 下载文件内容到内存
-        file_stream = io.BytesIO()
-        await file.download_to_memory(out=file_stream)
-        file_stream.seek(0)
-        
-        # 验证文件内容
-        file_content = file_stream.read()
-        if len(file_content) == 0:
-            raise Exception("下载的文件内容为空")
-        
-        file_stream.seek(0)
-        logger.info(f"文件内容下载成功,大小: {len(file_content)} 字节")
-        
-        # 发送处理中的消息
-        processing_message = await update.message.reply_text("⏳ 正在处理PDF文件，请稍候...")
-        
-        # 尝试上传到Google Drive
-        try:
-            # 直接调用上传方法
-            result = drive_uploader.upload_receipt(
-                file_stream,
-                "invoice_pdf",
-                'application/pdf'
-            )
-            
-            if result:
-                # 保存PDF链接到用户数据
-                context.user_data['sales_invoice_pdf'] = result
-                logger.info(f"PDF上传成功，链接: {result['public_link']}")
-                
-                # 更新处理中的消息
-                success_message = await update.message.reply_text("✅ 发票PDF已上传成功")
-                
-                # 等待一秒让用户看到成功消息
-                await asyncio.sleep(1)
-                
-                # 删除处理中和成功消息
-                await processing_message.delete()
-                await success_message.delete()
-                
-                # 继续到确认页面
-                return await show_sales_confirmation(update, context)
-            else:
-                raise Exception("上传结果为空")
-                
-        except Exception as e:
-            logger.error(f"主要上传方法失败: {e}")
-            
-            # 尝试备用上传方法
-            try:
-                from google_sheets import GoogleSheetsManager
-                sheets_manager = GoogleSheetsManager()
-                
-                file_stream.seek(0)
-                backup_result = sheets_manager.upload_receipt_to_drive(
-                    file_stream,
-                    file_name,
-                    'application/pdf',
-                    'invoice_pdf'
-                )
-                
-                if backup_result:
-                    context.user_data['sales_invoice_pdf'] = backup_result
-                    success_message = await update.message.reply_text("✅ 发票PDF已上传成功(备用方法)")
-                    
-                    # 等待一秒让用户看到成功消息
-                    await asyncio.sleep(1)
-                    
-                    # 删除处理中和成功消息
-                    await processing_message.delete()
-                    await success_message.delete()
-                    
-                    return await show_sales_confirmation(update, context)
-                else:
-                    raise Exception("备用上传失败")
-                    
-            except Exception as backup_err:
-                logger.error(f"备用上传方法也失败了: {backup_err}")
-                await processing_message.edit_text(
-                    "❌ 发票PDF上传失败\n\n可能原因:\n1. 文件格式不兼容\n2. 网络连接问题\n3. 服务器暂时不可用\n\n请稍后再试"
-                )
-                context.user_data['sales_invoice_pdf'] = None
-                return SALES_INVOICE_PDF
-                
-    except Exception as e:
-        logger.error(f"处理发票PDF时出错: {e}", exc_info=True)
-        await update.message.reply_text("❌ 处理发票PDF时出错，请重试")
-        return SALES_INVOICE_PDF
-
-# 添加工作人员选择处理函数
-async def worker_select_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理工作人员选择"""
-    query = update.callback_query
-    await query.answer()
-    
-    # 从回调数据中提取工作人员名称
-    worker_data = query.data
-    
-    if worker_data.startswith("worker_"):
-        worker_name = worker_data.replace("worker_", "")
-        
-        # 处理自定义工作人员输入
-        if worker_name == "other":
-            keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await query.edit_message_text(
-                "👷 <b>Please enter worker name:</b>",
-                parse_mode=ParseMode.HTML,
-                reply_markup=reply_markup
-            )
-            
-            # 设置一个标记，表示我们正在等待自定义工作人员名称输入
-            context.user_data['waiting_for_custom_worker'] = True
-            return COST_WORKER
-        
-        # 正常工作人员选择
-        context.user_data['cost_worker'] = worker_name
-        context.user_data['cost_desc'] = f"Salary for {worker_name}"  # 自动设置描述
-        
-        # 显示基本工资输入界面
-        keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
+        # 显示错误消息
+        keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="menu_report")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
-            f"👷 <b>Worker:</b> {worker_name}\n\n<b>Please enter basic salary amount:</b>",
+            "❌ 生成P&L损益表失败，请稍后重试",
+            reply_markup=reply_markup
+        )
+    
+    return ConversationHandler.END
+
+async def report_salary_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理员工薪资汇总请求"""
+    query = update.callback_query
+    await query.answer()
+    
+    # 询问用户选择月份还是年度汇总
+    keyboard = [
+        [InlineKeyboardButton("📅 当月薪资", callback_data="salary_current_month")],
+        [InlineKeyboardButton("📆 年度薪资汇总", callback_data="salary_yearly")],
+        [InlineKeyboardButton("🔙 返回", callback_data="menu_report")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        "👨‍💼 <b>员工薪资汇总</b>\n\n请选择汇总期间:",
+        parse_mode=ParseMode.HTML,
+        reply_markup=reply_markup
+    )
+    
+    return ConversationHandler.END
+
+async def salary_current_month_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理当月薪资汇总请求"""
+    query = update.callback_query
+    await query.answer()
+    
+    await query.edit_message_text(
+        "⏳ 正在生成当月薪资汇总，请稍候...",
+        parse_mode=ParseMode.HTML
+    )
+    
+    try:
+        # 获取当前年月
+        current_year = datetime.now().year
+        current_month = datetime.now().month
+        
+        # 生成薪资汇总
+        sheets_manager = SheetsManager()
+        salary_data = sheets_manager.generate_salary_summary(current_year, current_month)
+        
+        if not salary_data:
+            # 如果没有数据，显示提示信息
+            keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="report_salary")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                "ℹ️ <b>当月没有薪资记录</b>",
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
+            )
+            return ConversationHandler.END
+        
+        # 构建报表消息
+        current_month_str = f"{current_year}-{current_month:02d}"
+        message = f"👨‍💼 <b>员工薪资汇总 ({current_month_str})</b>\n\n"
+        
+        # 添加每个工人的薪资信息
+        for i, worker in enumerate(salary_data):
+            if i > 0:
+                message += "\n" + "─" * 30 + "\n\n"
+                
+            message += f"<b>员工:</b> {worker['worker_name']}\n\n"
+            message += f"<b>收入项:</b>\n"
+            message += f"• 基本工资: RM{worker['basic_salary']:,.2f}\n"
+            
+            if worker['allowance'] > 0:
+                message += f"• 津贴: RM{worker['allowance']:,.2f}\n"
+                
+            if worker['overtime'] > 0:
+                message += f"• 加班费: RM{worker['overtime']:,.2f}\n"
+            
+            message += f"\n<b>法定扣除:</b>\n"
+            
+            if worker['epf_employee'] > 0 or worker['epf_employer'] > 0:
+                message += f"• EPF (员工 11%): RM{worker['epf_employee']:,.2f}\n"
+                message += f"• EPF (雇主 13%): RM{worker['epf_employer']:,.2f}\n"
+                
+            if worker['socso_employee'] > 0 or worker['socso_employer'] > 0:
+                message += f"• SOCSO (员工 0.5%): RM{worker['socso_employee']:,.2f}\n"
+                message += f"• SOCSO (雇主 1.75%): RM{worker['socso_employer']:,.2f}\n"
+            
+            message += f"\n<b>合计:</b>\n"
+            message += f"• 净工资: RM{worker['net_salary']:,.2f}\n"
+            message += f"• 雇主总成本: RM{worker['total_employer_cost']:,.2f}\n"
+        
+        # 添加返回按钮
+        keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="report_salary")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            message,
             parse_mode=ParseMode.HTML,
             reply_markup=reply_markup
         )
         
-        # 设置状态进入工资计算流程
-        return WORKER_BASIC_SALARY
+    except Exception as e:
+        logger.error(f"生成当月薪资汇总失败: {e}")
+        
+        # 显示错误消息
+        keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="report_salary")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "❌ 生成薪资汇总失败，请稍后重试",
+            reply_markup=reply_markup
+        )
     
-    # 未知回调数据
-    await query.edit_message_text("❌ Unknown operation, please try again.")
+    return ConversationHandler.END
+
+async def salary_yearly_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理年度薪资汇总请求"""
+    query = update.callback_query
+    await query.answer()
+    
+    await query.edit_message_text(
+        "⏳ 正在生成年度薪资汇总，请稍候...",
+        parse_mode=ParseMode.HTML
+    )
+    
+    try:
+        # 获取当前年份
+        current_year = datetime.now().year
+        
+        # 生成薪资汇总
+        sheets_manager = SheetsManager()
+        salary_data = sheets_manager.generate_salary_summary(current_year)
+        
+        if not salary_data:
+            # 如果没有数据，显示提示信息
+            keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="report_salary")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                f"ℹ️ <b>{current_year}年度没有薪资记录</b>",
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
+            )
+            return ConversationHandler.END
+        
+        # 构建报表消息
+        message = f"👨‍💼 <b>员工薪资年度汇总 ({current_year})</b>\n\n"
+        
+        # 添加每个工人的薪资信息
+        for i, worker in enumerate(salary_data):
+            if i > 0:
+                message += "\n" + "─" * 30 + "\n\n"
+                
+            message += f"<b>员工:</b> {worker['worker_name']}\n\n"
+            message += f"<b>年度收入:</b>\n"
+            message += f"• 基本工资: RM{worker['basic_salary']:,.2f}\n"
+            
+            if worker['allowance'] > 0:
+                message += f"• 津贴: RM{worker['allowance']:,.2f}\n"
+                
+            if worker['overtime'] > 0:
+                message += f"• 加班费: RM{worker['overtime']:,.2f}\n"
+            
+            message += f"\n<b>年度法定扣除:</b>\n"
+            
+            if worker['epf_employee'] > 0 or worker['epf_employer'] > 0:
+                message += f"• EPF (员工 11%): RM{worker['epf_employee']:,.2f}\n"
+                message += f"• EPF (雇主): RM{worker['epf_employer']:,.2f}\n"
+                
+            if worker['socso_employee'] > 0 or worker['socso_employer'] > 0:
+                message += f"• SOCSO (员工 0.5%): RM{worker['socso_employee']:,.2f}\n"
+                message += f"• SOCSO (雇主 1.75%): RM{worker['socso_employer']:,.2f}\n"
+            
+            message += f"\n<b>年度合计:</b>\n"
+            message += f"• 净工资: RM{worker['net_salary']:,.2f}\n"
+            message += f"• 雇主总成本: RM{worker['total_employer_cost']:,.2f}\n"
+        
+        # 添加LHDN报税提示
+        message += f"\n\n<i>注：此报表可用于员工LHDN EA/EC表格准备</i>"
+        
+        # 添加返回按钮
+        keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="report_salary")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            message,
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+        
+    except Exception as e:
+        logger.error(f"生成年度薪资汇总失败: {e}")
+        
+        # 显示错误消息
+        keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="report_salary")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "❌ 生成薪资汇总失败，请稍后重试",
+            reply_markup=reply_markup
+        )
+    
+    return ConversationHandler.END
+
+async def report_tax_summary_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理LHDN税务摘要请求"""
+    query = update.callback_query
+    await query.answer()
+    
+    await query.edit_message_text(
+        "⏳ 正在生成LHDN税务摘要，请稍候...",
+        parse_mode=ParseMode.HTML
+    )
+    
+    try:
+        # 获取当前年份
+        current_year = datetime.now().year
+        
+        # 生成税务摘要
+        sheets_manager = SheetsManager()
+        tax_data = sheets_manager.generate_tax_summary(current_year)
+        
+        # 构建报表消息
+        message = f"""
+💼 <b>LHDN 税务摘要 ({current_year}年度)</b>
+<i>符合 LHDN Form B 格式</i>
+
+<b>1. 收入概要:</b>
+• 总营业收入: RM{tax_data['total_revenue']:,.2f}
+
+<b>2. 可扣除费用:</b>
+• 业务支出: RM{tax_data['business_expenses']:,.2f}
+• 折旧: RM{tax_data['depreciation']:,.2f} (不可直接扣除)
+
+<b>3. 资本津贴与扣减:</b>
+• 资本免税额: RM{tax_data['capital_allowances']:,.2f}
+
+<b>4. 结算:</b>
+• 前期亏损结转: RM{tax_data['business_loss_cf']:,.2f}
+• 净课税收入: RM{tax_data['taxable_business_income']:,.2f}
+
+<i>此报表按照马来西亚LHDN Form B要求格式生成，可用于准备税务申报</i>
+<i>更新日期: {tax_data['updated_date']}</i>
+"""
+        
+        # 添加返回按钮
+        keyboard = [[InlineKeyboardButton("🔙 返回报表中心", callback_data="menu_report")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            message,
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+        
+    except Exception as e:
+        logger.error(f"生成税务摘要失败: {e}")
+        
+        # 显示错误消息
+        keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="menu_report")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "❌ 生成税务摘要失败，请稍后重试",
+            reply_markup=reply_markup
+        )
+    
+    return ConversationHandler.END
+
+async def report_export_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理导出报表到Google Sheet请求"""
+    query = update.callback_query
+    await query.answer()
+    
+    await query.edit_message_text(
+        "⏳ 正在导出所有报表到Google Sheets，请稍候...",
+        parse_mode=ParseMode.HTML
+    )
+    
+    try:
+        # 获取当前年份
+        current_year = datetime.now().year
+        
+        # 导出所有报表
+        sheets_manager = SheetsManager()
+        result = sheets_manager.export_all_reports(current_year)
+        
+        if result:
+            # 导出成功
+            message = f"""
+✅ <b>所有报表已成功导出到Google Sheets</b>
+
+📊 已导出的报表:
+• P&L 损益表 (Monthly P&L)
+• 员工薪资汇总 (Salary Summary)
+• LHDN 税务摘要 (LHDN Tax Summary)
+
+这些报表符合马来西亚LHDN最新格式要求，可用于准备税务申报。
+"""
+        else:
+            # 导出失败
+            message = "❌ <b>部分或所有报表导出失败</b>\n\n请检查日志了解详情。"
+        
+        # 添加返回按钮
+        keyboard = [[InlineKeyboardButton("🔙 返回报表中心", callback_data="menu_report")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            message,
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+        
+    except Exception as e:
+        logger.error(f"导出报表失败: {e}")
+        
+        # 显示错误消息
+        keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="menu_report")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "❌ 导出报表失败，请稍后重试",
+            reply_markup=reply_markup
+        )
+    
     return ConversationHandler.END
 
 async def custom_worker_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -3356,3 +2476,50 @@ async def calculate_and_show_salary_confirmation(update: Update, context: Contex
     )
     
     return WORKER_CONFIRM
+
+def register_handlers(application):
+    """注册所有处理器"""
+    # 基础命令
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("cancel", cancel_command))
+    application.add_handler(CommandHandler("settings", setting_command))
+    
+    # 销售相关处理器
+    application.add_handler(sales_conversation)
+    
+    # 费用相关处理器
+    application.add_handler(expenses_conversation)
+    
+    # 报表相关处理器
+    application.add_handler(report_conversation)
+    
+    # 设置相关处理器
+    application.add_handler(setting_conversation)
+    
+    # 导航菜单处理器
+    application.add_handler(CallbackQueryHandler(main_menu, pattern="^back_main$"))
+    application.add_handler(CallbackQueryHandler(sales_menu, pattern="^menu_sales$"))
+    application.add_handler(CallbackQueryHandler(cost_menu, pattern="^menu_cost$"))
+    application.add_handler(CallbackQueryHandler(report_menu, pattern="^menu_report$"))
+    application.add_handler(CallbackQueryHandler(setting_menu, pattern="^menu_settings$"))
+    
+    # 基础报表处理器
+    application.add_handler(CallbackQueryHandler(report_current_handler, pattern="^report_current$"))
+    application.add_handler(CallbackQueryHandler(report_custom_handler, pattern="^report_custom$"))
+    application.add_handler(CallbackQueryHandler(report_month_select_handler, pattern="^month_"))
+    application.add_handler(CallbackQueryHandler(report_yearly_handler, pattern="^report_yearly$"))
+    
+    # LHDN报表处理器
+    application.add_handler(CallbackQueryHandler(report_pnl_handler, pattern="^report_pnl$"))
+    application.add_handler(CallbackQueryHandler(report_salary_handler, pattern="^report_salary$"))
+    application.add_handler(CallbackQueryHandler(report_tax_summary_handler, pattern="^report_tax_summary$"))
+    application.add_handler(CallbackQueryHandler(report_export_handler, pattern="^report_export$"))
+    application.add_handler(CallbackQueryHandler(salary_current_month_handler, pattern="^salary_current_month$"))
+    application.add_handler(CallbackQueryHandler(salary_yearly_handler, pattern="^salary_yearly$"))
+    
+    # 未知命令处理器
+    application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
+    
+    # 错误处理器
+    application.add_error_handler(error_handler)
