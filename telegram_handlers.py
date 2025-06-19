@@ -154,6 +154,232 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     return ConversationHandler.END
 
 # ====================================
+# 系统设置区 - 代理商、供应商、工人、负责人
+# ====================================
+
+async def setting_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理 /settings 命令"""
+    return await setting_menu(update, context)
+
+async def setting_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """设置主菜单"""
+    # 清除用户数据
+    context.user_data.clear()
+    
+    keyboard = [
+        [InlineKeyboardButton("👨‍💼 Add Agent", callback_data="setting_create_agent")],
+        [InlineKeyboardButton("🏭 Add Supplier", callback_data="setting_create_supplier")],
+        [InlineKeyboardButton("👷 Add Worker", callback_data="setting_create_worker")],
+        [InlineKeyboardButton("👨‍💼 Add PIC", callback_data="setting_create_pic")],
+        [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="back_main")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    message = "⚙️ <b>SETTINGS</b>\n\nPlease select an option:"
+    
+    if update.callback_query:
+        await update.callback_query.edit_message_text(
+            message, 
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+    else:
+        await update.message.reply_html(
+            message,
+            reply_markup=reply_markup
+        )
+    
+    return ConversationHandler.END
+
+async def setting_category_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理设置类别选择"""
+    query = update.callback_query
+    await query.answer()
+    
+    category = query.data.replace("category_", "")
+    context.user_data['setting_category'] = category
+    
+    keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_main")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    categories = {
+        "agent": "Agent",
+        "supplier": "Supplier",
+        "worker": "Worker",
+        "pic": "Person in Charge"
+    }
+    
+    category_name = categories.get(category, "Unknown")
+    
+    await query.edit_message_text(
+        f"✏️ <b>Adding {category_name}</b>\n\nPlease enter name:",
+        parse_mode=ParseMode.HTML,
+        reply_markup=reply_markup
+    )
+    
+    return SETTING_NAME
+
+async def setting_name_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理名称输入"""
+    name = update.message.text.strip()
+    context.user_data['setting_name'] = name
+    
+    category = context.user_data.get('setting_category', '')
+    
+    keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_main")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # 根据不同类别请求不同信息
+    if category == "agent":
+        await update.message.reply_html(
+            f"👨‍💼 <b>Agent Name:</b> {name}\n\n<b>Please enter IC/Contact Number:</b>",
+            reply_markup=reply_markup
+        )
+        return SETTING_IC
+    elif category == "supplier":
+        await update.message.reply_html(
+            f"🏭 <b>Supplier Name:</b> {name}\n\n<b>Please enter Contact Person:</b>",
+            reply_markup=reply_markup
+        )
+        return SETTING_IC
+    elif category == "worker":
+        await update.message.reply_html(
+            f"👷 <b>Worker Name:</b> {name}\n\n<b>Please enter Contact Number:</b>",
+            reply_markup=reply_markup
+        )
+        return SETTING_IC
+    elif category == "pic":
+        await update.message.reply_html(
+            f"👨‍💼 <b>PIC Name:</b> {name}\n\n<b>Please enter Contact Number:</b>",
+            reply_markup=reply_markup
+        )
+        return SETTING_IC
+    
+    # 未知类别
+    await update.message.reply_text("❌ Unknown category")
+    return ConversationHandler.END
+
+async def setting_ic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理IC/联系方式输入"""
+    ic = update.message.text.strip()
+    context.user_data['setting_ic'] = ic
+    
+    category = context.user_data.get('setting_category', '')
+    name = context.user_data.get('setting_name', '')
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Active", callback_data="type_active")],
+        [InlineKeyboardButton("❌ Inactive", callback_data="type_inactive")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="back_main")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # 特殊处理代理商
+    if category == "agent":
+        await update.message.reply_html(
+            f"👨‍💼 <b>Agent Name:</b> {name}\n<b>IC/Contact:</b> {ic}\n\n<b>Please enter commission rate (%):</b>",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="back_main")]])
+        )
+        return SETTING_RATE
+    
+    # 其他类别设置状态
+    ic_label = "Contact" if category != "agent" else "IC/Contact"
+    
+    await update.message.reply_html(
+        f"<b>{category.capitalize()} Name:</b> {name}\n<b>{ic_label}:</b> {ic}\n\n<b>Please select status:</b>",
+        reply_markup=reply_markup
+    )
+    
+    return SETTING_TYPE
+
+async def setting_type_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理类型/状态选择"""
+    query = update.callback_query
+    await query.answer()
+    
+    status = "Active" if query.data == "type_active" else "Inactive"
+    context.user_data['setting_status'] = status
+    
+    # 尝试保存到数据库
+    try:
+        sheets_manager = SheetsManager()
+        
+        category = context.user_data.get('setting_category', '')
+        name = context.user_data.get('setting_name', '')
+        ic = context.user_data.get('setting_ic', '')
+        
+        # 准备数据
+        data = {
+            "name": name,
+            "contact": ic,  # 使用同一字段存储IC或联系方式
+            "status": status
+        }
+        
+        # 根据不同类别调用不同方法
+        if category == "agent":
+            # 代理商需要先设置佣金率
+            return SETTING_TYPE
+        elif category == "supplier":
+            sheets_manager.add_supplier(data)
+        elif category == "worker":
+            sheets_manager.add_worker(data)
+        elif category == "pic":
+            sheets_manager.add_pic(data)
+        
+        # 显示成功消息
+        keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="back_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            f"✅ {category.capitalize()} \"{name}\" has been successfully added!",
+            reply_markup=reply_markup
+        )
+        
+    except Exception as e:
+        logger.error(f"保存设置失败: {e}")
+        await query.edit_message_text(
+            "❌ Failed to save. Please try again later.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="back_main")]])
+        )
+    
+    return ConversationHandler.END
+
+async def setting_rate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理佣金率输入"""
+    try:
+        rate_text = update.message.text.strip().replace('%', '')
+        rate = float(rate_text)
+        
+        # 验证合理性
+        if rate < 0 or rate > 100:
+            await update.message.reply_text("⚠️ 请输入0-100之间的百分比")
+            return SETTING_RATE
+        
+        context.user_data['setting_rate'] = rate
+        
+        # 设置状态选择
+        keyboard = [
+            [InlineKeyboardButton("✅ Active", callback_data="type_active")],
+            [InlineKeyboardButton("❌ Inactive", callback_data="type_inactive")],
+            [InlineKeyboardButton("❌ Cancel", callback_data="back_main")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        name = context.user_data.get('setting_name', '')
+        ic = context.user_data.get('setting_ic', '')
+        
+        await update.message.reply_html(
+            f"👨‍💼 <b>Agent Name:</b> {name}\n<b>IC/Contact:</b> {ic}\n<b>Commission Rate:</b> {rate}%\n\n<b>Please select status:</b>",
+            reply_markup=reply_markup
+        )
+        
+        return SETTING_TYPE
+        
+    except ValueError:
+        await update.message.reply_text("⚠️ 请输入有效的数字")
+        return SETTING_RATE
+
+# ====================================
 # 销售记录区 - 发票登记、客户选择、佣金计算
 # ====================================
 
@@ -813,6 +1039,56 @@ async def cost_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     )
     
     return COST_TYPE
+
+async def cost_list_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """查看费用记录"""
+    query = update.callback_query
+    await query.answer()
+    
+    try:
+        sheets_manager = SheetsManager()
+        
+        # 获取当前月份的费用记录
+        current_month = datetime.now().strftime('%Y-%m')
+        expense_records = sheets_manager.get_expense_records(current_month)
+        
+        # 只显示最近10条记录
+        expense_records = expense_records[-10:] if len(expense_records) > 10 else expense_records
+        
+        if not expense_records:
+            message = "📋 <b>当月没有费用记录</b>"
+        else:
+            message = "📋 <b>本月费用记录</b>\n\n"
+            for record in expense_records:
+                message += f"📅 <b>日期:</b> {record.get('date', '')}\n"
+                message += f"📝 <b>类型:</b> {record.get('type', '')}\n"
+                
+                if record.get('type') == "Worker Salary":
+                    message += f"👷 <b>工人:</b> {record.get('supplier', '')}\n"
+                else:
+                    message += f"🏭 <b>供应商:</b> {record.get('supplier', '')}\n"
+                    
+                message += f"💰 <b>金额:</b> RM{record.get('amount', 0):,.2f}\n"
+                
+                if record.get('receipt'):
+                    message += f"📎 <b>收据:</b> 已上传\n"
+                    
+                message += "-------------------------\n\n"
+        
+        keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="menu_cost")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            message,
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+        
+    except Exception as e:
+        logger.error(f"获取费用记录失败: {e}")
+        await query.edit_message_text("❌ 获取记录失败，请重试",
+                                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 返回", callback_data="menu_cost")]]))
+        return ConversationHandler.END
 
 async def cost_type_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """处理费用类型选择"""
@@ -2129,6 +2405,54 @@ async def custom_worker_handler(update: Update, context: ContextTypes.DEFAULT_TY
 # 工人薪资计算区 - 基本工资、津贴、加班、EPF/SOCSO
 # ====================================
 
+async def worker_select_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理工作人员选择"""
+    query = update.callback_query
+    await query.answer()
+    
+    # 从回调数据中提取工作人员名称
+    worker_data = query.data
+    
+    if worker_data.startswith("worker_"):
+        worker_name = worker_data.replace("worker_", "")
+        
+        # 处理自定义工作人员输入
+        if worker_name == "other":
+            keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                "👷 <b>Please enter worker name:</b>",
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
+            )
+            
+            # 设置一个标记，表示我们正在等待自定义工作人员名称输入
+            context.user_data['waiting_for_custom_worker'] = True
+            return COST_WORKER
+        
+        # 正常工作人员选择
+        context.user_data['cost_worker'] = worker_name
+        context.user_data['cost_desc'] = f"Salary for {worker_name}"  # 自动设置描述
+        context.user_data['cost_type'] = "Worker Salary"  # 设置费用类型为工资
+        
+        # 显示基本工资输入界面
+        keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            f"👷 <b>Worker:</b> {worker_name}\n\n<b>Please enter basic salary amount:</b>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+        
+        return WORKER_BASIC_SALARY
+    
+    # 其他回调处理
+    await query.edit_message_text("❌ Unknown selection, please try again",
+                                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="back_cost")]]))
+    return COST_WORKER
+
 async def worker_basic_salary_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """处理工人基本工资输入"""
     try:
@@ -2746,330 +3070,9 @@ setting_conversation = ConversationHandler(
     persistent=False
 )
 
-# 定义缺失的cost_list_handler函数
-async def cost_list_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """查看费用记录"""
-    query = update.callback_query
-    await query.answer()
-    
-    try:
-        sheets_manager = SheetsManager()
-        
-        # 获取当前月份的费用记录
-        current_month = datetime.now().strftime('%Y-%m')
-        expense_records = sheets_manager.get_expense_records(current_month)
-        
-        # 只显示最近10条记录
-        expense_records = expense_records[-10:] if len(expense_records) > 10 else expense_records
-        
-        if not expense_records:
-            message = "📋 <b>当月没有费用记录</b>"
-        else:
-            message = "📋 <b>本月费用记录</b>\n\n"
-            for record in expense_records:
-                message += f"📅 <b>日期:</b> {record.get('date', '')}\n"
-                message += f"📝 <b>类型:</b> {record.get('type', '')}\n"
-                
-                if record.get('type') == "Worker Salary":
-                    message += f"👷 <b>工人:</b> {record.get('supplier', '')}\n"
-                else:
-                    message += f"🏭 <b>供应商:</b> {record.get('supplier', '')}\n"
-                    
-                message += f"💰 <b>金额:</b> RM{record.get('amount', 0):,.2f}\n"
-                
-                if record.get('receipt'):
-                    message += f"📎 <b>收据:</b> 已上传\n"
-                    
-                message += "-------------------------\n\n"
-        
-        keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="menu_cost")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            message,
-            parse_mode=ParseMode.HTML,
-            reply_markup=reply_markup
-        )
-        
-    except Exception as e:
-        logger.error(f"获取费用记录失败: {e}")
-        await query.edit_message_text("❌ 获取记录失败，请重试",
-                                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 返回", callback_data="menu_cost")]]))
-        return ConversationHandler.END
 
-# 定义缺失的worker_select_handler函数
-async def worker_select_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理工作人员选择"""
-    query = update.callback_query
-    await query.answer()
-    
-    # 从回调数据中提取工作人员名称
-    worker_data = query.data
-    
-    if worker_data.startswith("worker_"):
-        worker_name = worker_data.replace("worker_", "")
-        
-        # 处理自定义工作人员输入
-        if worker_name == "other":
-            keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await query.edit_message_text(
-                "👷 <b>Please enter worker name:</b>",
-                parse_mode=ParseMode.HTML,
-                reply_markup=reply_markup
-            )
-            
-            # 设置一个标记，表示我们正在等待自定义工作人员名称输入
-            context.user_data['waiting_for_custom_worker'] = True
-            return COST_WORKER
-        
-        # 正常工作人员选择
-        context.user_data['cost_worker'] = worker_name
-        context.user_data['cost_desc'] = f"Salary for {worker_name}"  # 自动设置描述
-        context.user_data['cost_type'] = "Worker Salary"  # 设置费用类型为工资
-        
-        # 显示基本工资输入界面
-        keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            f"👷 <b>Worker:</b> {worker_name}\n\n<b>Please enter basic salary amount:</b>",
-            parse_mode=ParseMode.HTML,
-            reply_markup=reply_markup
-        )
-        
-        return WORKER_BASIC_SALARY
-    
-    # 其他回调处理
-    await query.edit_message_text("❌ Unknown selection, please try again",
-                                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="back_cost")]]))
-    return COST_WORKER
 
-# 定义缺失的setting_command函数
-async def setting_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理 /settings 命令"""
-    return await setting_menu(update, context)
 
-# 定义缺失的setting_menu函数
-async def setting_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """设置主菜单"""
-    # 清除用户数据
-    context.user_data.clear()
-    
-    keyboard = [
-        [InlineKeyboardButton("👨‍💼 Add Agent", callback_data="setting_create_agent")],
-        [InlineKeyboardButton("🏭 Add Supplier", callback_data="setting_create_supplier")],
-        [InlineKeyboardButton("👷 Add Worker", callback_data="setting_create_worker")],
-        [InlineKeyboardButton("👨‍💼 Add PIC", callback_data="setting_create_pic")],
-        [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="back_main")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    message = "⚙️ <b>SETTINGS</b>\n\nPlease select an option:"
-    
-    if update.callback_query:
-        await update.callback_query.edit_message_text(
-            message, 
-            parse_mode=ParseMode.HTML,
-            reply_markup=reply_markup
-        )
-    else:
-        await update.message.reply_html(
-            message,
-            reply_markup=reply_markup
-        )
-    
-    return ConversationHandler.END
-
-# 定义缺失的setting_category_handler等函数
-async def setting_category_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理设置类别选择"""
-    query = update.callback_query
-    await query.answer()
-    
-    category = query.data.replace("category_", "")
-    context.user_data['setting_category'] = category
-    
-    keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_main")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    categories = {
-        "agent": "Agent",
-        "supplier": "Supplier",
-        "worker": "Worker",
-        "pic": "Person in Charge"
-    }
-    
-    category_name = categories.get(category, "Unknown")
-    
-    await query.edit_message_text(
-        f"✏️ <b>Adding {category_name}</b>\n\nPlease enter name:",
-        parse_mode=ParseMode.HTML,
-        reply_markup=reply_markup
-    )
-    
-    return SETTING_NAME
-
-async def setting_name_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理名称输入"""
-    name = update.message.text.strip()
-    context.user_data['setting_name'] = name
-    
-    category = context.user_data.get('setting_category', '')
-    
-    keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_main")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    # 根据不同类别请求不同信息
-    if category == "agent":
-        await update.message.reply_html(
-            f"👨‍💼 <b>Agent Name:</b> {name}\n\n<b>Please enter IC/Contact Number:</b>",
-            reply_markup=reply_markup
-        )
-        return SETTING_IC
-    elif category == "supplier":
-        await update.message.reply_html(
-            f"🏭 <b>Supplier Name:</b> {name}\n\n<b>Please enter Contact Person:</b>",
-            reply_markup=reply_markup
-        )
-        return SETTING_IC
-    elif category == "worker":
-        await update.message.reply_html(
-            f"👷 <b>Worker Name:</b> {name}\n\n<b>Please enter Contact Number:</b>",
-            reply_markup=reply_markup
-        )
-        return SETTING_IC
-    elif category == "pic":
-        await update.message.reply_html(
-            f"👨‍💼 <b>PIC Name:</b> {name}\n\n<b>Please enter Contact Number:</b>",
-            reply_markup=reply_markup
-        )
-        return SETTING_IC
-    
-    # 未知类别
-    await update.message.reply_text("❌ Unknown category")
-    return ConversationHandler.END
-
-async def setting_ic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理IC/联系方式输入"""
-    ic = update.message.text.strip()
-    context.user_data['setting_ic'] = ic
-    
-    category = context.user_data.get('setting_category', '')
-    name = context.user_data.get('setting_name', '')
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Active", callback_data="type_active")],
-        [InlineKeyboardButton("❌ Inactive", callback_data="type_inactive")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="back_main")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    # 特殊处理代理商
-    if category == "agent":
-        await update.message.reply_html(
-            f"👨‍💼 <b>Agent Name:</b> {name}\n<b>IC/Contact:</b> {ic}\n\n<b>Please enter commission rate (%):</b>",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="back_main")]])
-        )
-        return SETTING_RATE
-    
-    # 其他类别设置状态
-    ic_label = "Contact" if category != "agent" else "IC/Contact"
-    
-    await update.message.reply_html(
-        f"<b>{category.capitalize()} Name:</b> {name}\n<b>{ic_label}:</b> {ic}\n\n<b>Please select status:</b>",
-        reply_markup=reply_markup
-    )
-    
-    return SETTING_TYPE
-
-async def setting_type_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理类型/状态选择"""
-    query = update.callback_query
-    await query.answer()
-    
-    status = "Active" if query.data == "type_active" else "Inactive"
-    context.user_data['setting_status'] = status
-    
-    # 尝试保存到数据库
-    try:
-        sheets_manager = SheetsManager()
-        
-        category = context.user_data.get('setting_category', '')
-        name = context.user_data.get('setting_name', '')
-        ic = context.user_data.get('setting_ic', '')
-        
-        # 准备数据
-        data = {
-            "name": name,
-            "contact": ic,  # 使用同一字段存储IC或联系方式
-            "status": status
-        }
-        
-        # 根据不同类别调用不同方法
-        if category == "agent":
-            # 代理商需要先设置佣金率
-            return SETTING_TYPE
-        elif category == "supplier":
-            sheets_manager.add_supplier(data)
-        elif category == "worker":
-            sheets_manager.add_worker(data)
-        elif category == "pic":
-            sheets_manager.add_pic(data)
-        
-        # 显示成功消息
-        keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="back_main")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            f"✅ {category.capitalize()} \"{name}\" has been successfully added!",
-            reply_markup=reply_markup
-        )
-        
-    except Exception as e:
-        logger.error(f"保存设置失败: {e}")
-        await query.edit_message_text(
-            "❌ Failed to save. Please try again later.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="back_main")]])
-        )
-    
-    return ConversationHandler.END
-
-async def setting_rate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理佣金率输入"""
-    try:
-        rate_text = update.message.text.strip().replace('%', '')
-        rate = float(rate_text)
-        
-        # 验证合理性
-        if rate < 0 or rate > 100:
-            await update.message.reply_text("⚠️ 请输入0-100之间的百分比")
-            return SETTING_RATE
-        
-        context.user_data['setting_rate'] = rate
-        
-        # 设置状态选择
-        keyboard = [
-            [InlineKeyboardButton("✅ Active", callback_data="type_active")],
-            [InlineKeyboardButton("❌ Inactive", callback_data="type_inactive")],
-            [InlineKeyboardButton("❌ Cancel", callback_data="back_main")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        name = context.user_data.get('setting_name', '')
-        ic = context.user_data.get('setting_ic', '')
-        
-        await update.message.reply_html(
-            f"👨‍💼 <b>Agent Name:</b> {name}\n<b>IC/Contact:</b> {ic}\n<b>Commission Rate:</b> {rate}%\n\n<b>Please select status:</b>",
-            reply_markup=reply_markup
-        )
-        
-        return SETTING_TYPE
-        
-    except ValueError:
-        await update.message.reply_text("⚠️ 请输入有效的数字")
-        return SETTING_RATE
 
 async def report_month_select_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """处理月份选择"""
