@@ -56,10 +56,10 @@ class ScheduledTasksManager:
         try:
             # 设置任务
             # 每年12月31日23:00执行年度归档
-            schedule.every().december.at("23:00").do(self.yearly_archiving_task)
+            schedule.every().day.at("23:00").do(self._check_and_run_yearly_archive)
             
             # 每年1月1日00:05执行新年度初始化
-            schedule.every().january.at("00:05").do(self.new_year_initialization_task)
+            schedule.every().day.at("00:05").do(self._check_and_run_yearly_init)
             
             # 同时添加一个每天运行的测试任务，方便检查调度器是否正常运行
             schedule.every().day.at("09:00").do(self.daily_heartbeat_task)
@@ -158,6 +158,22 @@ class ScheduledTasksManager:
         
         logger.info(f"手动触发{year}年初始化任务")
         return self.new_year_initialization_task()
+    
+    def _check_and_run_yearly_archive(self) -> bool:
+        """检查是否为12月31日，如果是则执行年度归档任务"""
+        today = datetime.now()
+        if today.month == 12 and today.day == 31:
+            logger.info("今天是12月31日，执行年度归档任务")
+            return self.yearly_archiving_task()
+        return True
+    
+    def _check_and_run_yearly_init(self) -> bool:
+        """检查是否为1月1日，如果是则执行新年度初始化任务"""
+        today = datetime.now()
+        if today.month == 1 and today.day == 1:
+            logger.info("今天是1月1日，执行新年度初始化任务")
+            return self.new_year_initialization_task()
+        return True
 
 # 创建全局实例
 task_manager = ScheduledTasksManager()
