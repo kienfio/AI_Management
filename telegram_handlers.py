@@ -22,6 +22,9 @@ from telegram.ext import (
 
 from google_sheets import GoogleSheetsManager as SheetsManager
 
+# 设置日志
+logger = logging.getLogger(__name__)
+
 # 尝试导入年度自动化任务相关模块
 try:
     from scheduled_tasks import task_manager, manual_archive, manual_initialize
@@ -30,9 +33,6 @@ except ImportError:
     # 如果不可用，不要阻止程序运行
     HAS_SCHEDULER = False
     logger.warning("未找到scheduled_tasks模块，年度自动化功能将不可用")
-
-# 设置日志
-logger = logging.getLogger(__name__)
 
 # ====================================
 # 会话状态区 - ConversationHandler 状态定义
