@@ -19,13 +19,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# 尝试加载.env文件
+# 尝试加载环境变量文件
 try:
     from dotenv import load_dotenv
-    load_dotenv()
-    logger.info("已加载.env文件")
+    load_dotenv('env.example')  # 明确加载env.example文件
+    logger.info("已加载env.example文件")
 except ImportError:
-    logger.warning("dotenv模块未安装，跳过加载.env文件")
+    logger.warning("dotenv模块未安装，跳过加载环境变量文件")
 
 # 输出所有相关环境变量
 logger.info(f"DRIVE_FOLDER_INVOICE_PDF: {os.getenv('DRIVE_FOLDER_INVOICE_PDF')}")
