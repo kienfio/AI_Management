@@ -241,8 +241,8 @@ class GoogleSheetsManager:
                 return []
             
             # 获取表头和数据
-            headers = all_values[0]
-            data_rows = all_values[1:]
+            headers = all_values[0]  # 第一行是表头
+            data_rows = all_values[1:]  # 从第二行开始是数据
             
             # 处理记录
             formatted_records = []
