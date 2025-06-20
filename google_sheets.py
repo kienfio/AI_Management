@@ -20,8 +20,7 @@ SHEET_NAMES = {
     'suppliers': 'Suppliers Management',
     'workers': 'Workers Management',
     'pic': 'Person in Charge',
-    'pl': 'P&L Reports',  # 添加损益表工作表
-    'lhdn': 'LHDN Tax Summary'  # 添加税务汇总工作表
+    'pl': 'P&L Reports'  # 添加损益表工作表
 }
 
 SALES_HEADERS = ['Date', 'PIC', 'Invoice NO', 'Bill To', 'Amount', 'Status', 'Type', 'Agent Name', 'IC', 'Comm Rate', 'Comm Amount', 'Invoice PDF']
@@ -36,9 +35,7 @@ PL_HEADERS = ['Period', 'Revenue', 'Cost of Goods', 'Commission', 'Gross Profit'
               'Salary Expense', 'Utility Expense', 'Other Expense', 'Total Operating Expense', 
               'Net Profit', 'Profit Margin (%)']
 
-# 添加 LHDN 税务汇总表头
-LHDN_HEADERS = ['Year', 'Month', 'Total Revenue', 'Total Expenses', 'Net Income', 
-                'Business Income', 'Business Expenses', 'Taxable Income']
+# LHDN 税务汇总表头已移除
 
 logger = logging.getLogger(__name__)
 
@@ -175,8 +172,6 @@ class GoogleSheetsManager:
                     worksheet.append_row(PICS_HEADERS)
                 elif sheet_key == 'pl':
                     worksheet.append_row(PL_HEADERS)
-                elif sheet_key == 'lhdn':
-                    worksheet.append_row(LHDN_HEADERS)
                 
                 logger.info(f"✅ 创建工作表: {sheet_name}")
     
@@ -1195,96 +1190,7 @@ class GoogleSheetsManager:
             logger.error(f"❌ 导出损益表失败: {e}")
             return None
 
-    def export_lhdn_report(self, year: int) -> Dict[str, Any]:
-        """导出LHDN税务汇总报表到Google表格"""
-        try:
-            # 创建或获取LHDN报表工作表
-            sheet_name = f"LHDN Tax Summary {year}"
-            try:
-                worksheet = self.spreadsheet.worksheet(sheet_name)
-                # 如果工作表已存在，清空内容
-                worksheet.clear()
-            except:
-                # 如果工作表不存在，创建新工作表
-                worksheet = self.spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=20)
-            
-            # 添加表头
-            headers = ['Year', 'Month', 'Total Revenue', 'Total Expenses', 'Net Income', 
-                      'Business Income', 'Business Expenses', 'Taxable Income']
-            worksheet.append_row(headers)
-            
-            # 按月获取税务汇总数据
-            monthly_data = []
-            yearly_totals = {
-                'revenue': 0, 'expenses': 0, 'net_income': 0, 
-                'business_income': 0, 'business_expenses': 0, 'taxable_income': 0
-            }
-            
-            for month in range(1, 13):
-                month_str = f"{year}-{month:02d}"
-                # 获取月度报表数据
-                report_data = self.generate_monthly_report(month_str)
-                
-                # 计算税务相关数据
-                revenue = report_data['total_sales']
-                expenses = report_data['total_cost']
-                net_income = report_data['net_profit']
-                
-                # 业务收入和支出（可根据实际税务规则调整）
-                business_income = revenue
-                business_expenses = expenses
-                taxable_income = net_income
-                
-                # 添加到月度数据列表
-                monthly_data.append([
-                    str(year),
-                    month_str,
-                    revenue,
-                    expenses,
-                    net_income,
-                    business_income,
-                    business_expenses,
-                    taxable_income
-                ])
-                
-                # 累加年度总计
-                yearly_totals['revenue'] += revenue
-                yearly_totals['expenses'] += expenses
-                yearly_totals['net_income'] += net_income
-                yearly_totals['business_income'] += business_income
-                yearly_totals['business_expenses'] += business_expenses
-                yearly_totals['taxable_income'] += taxable_income
-            
-            # 添加月度数据
-            worksheet.append_rows(monthly_data)
-            
-            # 添加年度总计
-            worksheet.append_row([])  # 空行
-            worksheet.append_row([
-                str(year),
-                'Total',
-                yearly_totals['revenue'],
-                yearly_totals['expenses'],
-                yearly_totals['net_income'],
-                yearly_totals['business_income'],
-                yearly_totals['business_expenses'],
-                yearly_totals['taxable_income']
-            ])
-            
-            # 格式化数字列为货币格式
-            worksheet.format('C2:H14', {'numberFormat': {'type': 'CURRENCY', 'pattern': '"RM"#,##0.00'}})
-            
-            logger.info(f"✅ LHDN税务汇总报表导出成功: {sheet_name}")
-            
-            return {
-                'sheet_name': sheet_name,
-                'sheet_url': f"https://docs.google.com/spreadsheets/d/{self.spreadsheet_id}/edit#gid={worksheet.id}",
-                'year': year
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ 导出LHDN税务汇总报表失败: {e}")
-            return None
+
 
 # 创建全局实例
 sheets_manager = GoogleSheetsManager()
