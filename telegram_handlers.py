@@ -1852,7 +1852,6 @@ async def report_export_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
         [InlineKeyboardButton("📊 销售报表", callback_data="export_sales")],
         [InlineKeyboardButton("💸 支出报表", callback_data="export_expenses")],
         [InlineKeyboardButton("💹 损益报表", callback_data="export_pl")],
-        [InlineKeyboardButton("📑 LHDN报税汇总", callback_data="export_lhdn")],
         [InlineKeyboardButton("🔙 返回报表菜单", callback_data="menu_report")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1894,9 +1893,6 @@ async def report_export_handler(update: Update, context: ContextTypes.DEFAULT_TY
         elif export_type == "pl":
             result = sheets_manager.export_pl_report(current_year)
             report_name = "损益报表"
-        elif export_type == "lhdn":
-            result = sheets_manager.export_lhdn_report(current_year)
-            report_name = "LHDN报税汇总"
         else:
             raise ValueError(f"未知的导出类型: {export_type}")
         
@@ -2119,8 +2115,6 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     elif query.data == "export_expenses":
         return await report_export_handler(update, context)
     elif query.data == "export_pl":
-        return await report_export_handler(update, context)
-    elif query.data == "export_lhdn":
         return await report_export_handler(update, context)
     
     # 默认返回主菜单
