@@ -7,11 +7,16 @@ Google Sheets API 集成
 
 import logging
 import os
-from datetime import datetime
-from typing import List, Dict, Optional, Any
+import time
+from datetime import datetime, timedelta
+from typing import List, Dict, Optional, Any, Tuple, Union
 import gspread
 import json
 from google.oauth2.service_account import Credentials
+import base64
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
+import random
 # 直接导入常量，避免循环导入
 SHEET_NAMES = {
     'sales': 'Sales Records',
@@ -33,14 +38,78 @@ PICS_HEADERS = ['Name', 'Contact', 'Phone', 'Department', 'Status']
 
 logger = logging.getLogger(__name__)
 
+# 添加重试装饰器
+def retry_on_quota_exceeded(max_retries=3, initial_delay=5, backoff_factor=2):
+    """装饰器：在配额超限时进行重试
+    
+    Args:
+        max_retries: 最大重试次数
+        initial_delay: 初始延迟时间（秒）
+        backoff_factor: 退避因子，每次重试后延迟时间会乘以这个因子
+    """
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            delay = initial_delay
+            last_exception = None
+            
+            for attempt in range(max_retries + 1):
+                try:
+                    if attempt > 0:
+                        logger = logging.getLogger(__name__)
+                        logger.info(f"第 {attempt} 次重试 {func.__name__}...")
+                    
+                    return func(*args, **kwargs)
+                    
+                except Exception as e:
+                    last_exception = e
+                    error_message = str(e).lower()
+                    
+                    # 检查是否是配额超限错误
+                    if "quota exceeded" in error_message or "429" in error_message:
+                        if attempt < max_retries:
+                            logger = logging.getLogger(__name__)
+                            logger.warning(f"API配额超限，等待 {delay} 秒后重试...")
+                            
+                            # 添加一些随机性避免所有请求同时重试
+                            jitter = random.uniform(0.8, 1.2)
+                            time.sleep(delay * jitter)
+                            
+                            # 增加下一次重试的延迟
+                            delay *= backoff_factor
+                        else:
+                            logger.error(f"达到最大重试次数 ({max_retries})，放弃操作")
+                            raise
+                    else:
+                        # 如果不是配额错误，直接抛出
+                        raise
+            
+            # 如果所有重试都失败，抛出最后捕获的异常
+            raise last_exception
+        
+        return wrapper
+    
+    return decorator
+
 class GoogleSheetsManager:
     """Google Sheets 管理器"""
     
     def __init__(self):
+        """初始化 Google Sheets 管理器"""
+        self.creds = None
         self.client = None
         self.spreadsheet = None
-        self.spreadsheet_id = None
+        self.spreadsheet_id = os.environ.get('GOOGLE_SHEET_ID')
+        self.drive_service = None
+        
+        # 初始化API请求限制
+        self.request_count = 0
+        self.request_reset_time = datetime.now()
+        self.max_requests_per_minute = 60  # Google Sheets API 默认限制
+        
+        # 初始化
+        self._get_credentials()
         self._initialize_client()
+        self._ensure_worksheets_exist()
     
     def _get_credentials(self) -> Credentials:
         """获取 Google API 凭证 - 支持多种方式"""
@@ -53,7 +122,6 @@ class GoogleSheetsManager:
         google_creds_base64 = os.getenv('GOOGLE_CREDENTIALS_BASE64')
         if google_creds_base64:
             try:
-                import base64
                 # 解码Base64字符串
                 creds_json = base64.b64decode(google_creds_base64).decode('utf-8')
                 creds_info = json.loads(creds_json)
@@ -123,7 +191,6 @@ class GoogleSheetsManager:
             creds = self._get_credentials()
             
             # 获取表格 ID
-            self.spreadsheet_id = os.getenv('GOOGLE_SHEET_ID')
             if not self.spreadsheet_id:
                 raise ValueError("❌ 未设置 GOOGLE_SHEET_ID 环境变量")
             
@@ -167,11 +234,45 @@ class GoogleSheetsManager:
                 
                 logger.info(f"✅ 创建工作表: {sheet_name}")
     
+    # 添加请求限制方法
+    def _limit_request_rate(self):
+        """限制API请求速率，避免超过配额"""
+        now = datetime.now()
+        
+        # 如果已经过了一分钟，重置计数器
+        if (now - self.request_reset_time).total_seconds() > 60:
+            self.request_count = 0
+            self.request_reset_time = now
+            return
+        
+        # 如果接近限制，等待适当的时间
+        if self.request_count >= self.max_requests_per_minute - 5:  # 留一些余量
+            wait_time = 60 - (now - self.request_reset_time).total_seconds()
+            if wait_time > 0:
+                logger = logging.getLogger(__name__)
+                logger.info(f"接近API请求限制，等待 {wait_time:.1f} 秒...")
+                time.sleep(wait_time + 1)  # 额外等待1秒以确保安全
+                self.request_count = 0
+                self.request_reset_time = datetime.now()
+        
+        # 增加请求计数
+        self.request_count += 1
+    
+    @retry_on_quota_exceeded()
     def get_worksheet(self, sheet_name: str):
-        """获取指定工作表"""
+        """获取指定名称的工作表
+        
+        Args:
+            sheet_name: 工作表名称
+            
+        Returns:
+            工作表对象，如果不存在则返回None
+        """
+        self._limit_request_rate()
         try:
             return self.spreadsheet.worksheet(sheet_name)
         except Exception as e:
+            logger = logging.getLogger(__name__)
             logger.error(f"❌ 获取工作表失败 {sheet_name}: {e}")
             return None
     
@@ -220,8 +321,17 @@ class GoogleSheetsManager:
             logger.error(f"❌ 添加销售记录失败: {e}")
             return False
     
+    @retry_on_quota_exceeded()
     def get_sales_records(self, month: Optional[str] = None) -> List[Dict]:
-        """获取销售记录"""
+        """获取销售记录
+        
+        Args:
+            month: 可选的月份筛选，格式为 'YYYY-MM'
+            
+        Returns:
+            销售记录列表
+        """
+        self._limit_request_rate()
         try:
             worksheet = self.get_worksheet(SHEET_NAMES['sales'])
             if not worksheet:
@@ -324,8 +434,17 @@ class GoogleSheetsManager:
             logger.error(f"❌ 添加费用记录失败: {e}")
             return False
     
+    @retry_on_quota_exceeded()
     def get_expense_records(self, month: Optional[str] = None) -> List[Dict]:
-        """获取费用记录"""
+        """获取支出记录
+        
+        Args:
+            month: 可选的月份筛选，格式为 'YYYY-MM'
+            
+        Returns:
+            支出记录列表
+        """
+        self._limit_request_rate()
         try:
             worksheet = self.get_worksheet(SHEET_NAMES['expenses'])
             if not worksheet:
@@ -378,7 +497,7 @@ class GoogleSheetsManager:
             return formatted_records
             
         except Exception as e:
-            logger.error(f"❌ 获取费用记录失败: {e}")
+            logger.error(f"❌ 获取支出记录失败: {e}")
             return []
     
     # =============================================================================
@@ -1048,6 +1167,406 @@ class GoogleSheetsManager:
             
         except Exception as e:
             logger.error(f"❌ 导出损益表失败: {e}")
+            return None
+
+    # =============================================================================
+    # 归档和年度管理功能
+    # =============================================================================
+    
+    def archive_yearly_data(self, year: int) -> Dict[str, Any]:
+        """归档特定年份的数据
+        
+        将特定年份的销售和支出数据从主记录表复制到专门的归档表格
+        并对数据进行整理归纳
+        
+        Args:
+            year: 要归档的年份
+            
+        Returns:
+            包含归档结果的字典
+        """
+        try:
+            logger = logging.getLogger(__name__)
+            logger.info(f"开始归档{year}年数据...")
+            result = {
+                'archived_sales': 0,
+                'archived_expenses': 0,
+                'archive_sheets': []
+            }
+            
+            # 创建年度归档工作表（如果不存在）
+            archive_sheet_name = f"Data Archive {year}"
+            try:
+                archive_sheet = self.spreadsheet.worksheet(archive_sheet_name)
+                logger.info(f"归档表已存在: {archive_sheet_name}")
+            except:
+                archive_sheet = self.spreadsheet.add_worksheet(
+                    title=archive_sheet_name, rows=5000, cols=20
+                )
+                logger.info(f"创建归档表: {archive_sheet_name}")
+                
+            result['archive_sheets'].append(archive_sheet_name)
+            
+            # 1. 归档销售数据
+            sales_archived = self._archive_sales_data(year, archive_sheet)
+            result['archived_sales'] = sales_archived
+            
+            # 2. 归档支出数据
+            expenses_archived = self._archive_expense_data(year, archive_sheet)
+            result['archived_expenses'] = expenses_archived
+            
+            # 3. 创建归档报表索引
+            index_sheet_name = f"Archives {year}"
+            try:
+                index_sheet = self.spreadsheet.worksheet(index_sheet_name)
+                logger.info(f"归档索引表已存在: {index_sheet_name}")
+            except:
+                index_sheet = self.spreadsheet.add_worksheet(
+                    title=index_sheet_name, rows=100, cols=10
+                )
+                logger.info(f"创建归档索引表: {index_sheet_name}")
+                
+                # 添加索引表标题和说明
+                index_sheet.update('A1', f"{year}年度数据归档")
+                index_sheet.update('A2', f"创建时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                index_sheet.update('A4', "此工作表包含归档报表的索引和链接:")
+                
+                # 添加报表链接
+                reports = [
+                    (f"销售报表 {year}", f"Sales Report {year}"),
+                    (f"支出报表 {year}", f"Expenses Report {year}"),
+                    (f"损益表 {year}", f"P&L Report {year}"),
+                    (f"数据归档 {year}", f"Data Archive {year}")
+                ]
+                
+                row = 6
+                for report_name, sheet_name in reports:
+                    try:
+                        sheet = self.spreadsheet.worksheet(sheet_name)
+                        sheet_url = f"https://docs.google.com/spreadsheets/d/{self.spreadsheet_id}/edit#gid={sheet.id}"
+                        
+                        # 添加报表链接
+                        index_sheet.update(f'A{row}', report_name)
+                        index_sheet.update(f'B{row}', f'=HYPERLINK("{sheet_url}","点击查看")')
+                        row += 1
+                    except Exception as e:
+                        logger.warning(f"无法添加'{sheet_name}'的链接: {e}")
+                
+            result['archive_sheets'].append(index_sheet_name)
+            
+            logger.info(f"✅ {year}年数据归档完成: 销售记录 {sales_archived} 条, 支出记录 {expenses_archived} 条")
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ 归档{year}年数据失败: {e}")
+            return None
+    
+    def _archive_sales_data(self, year: int, archive_sheet) -> int:
+        """归档销售数据到指定工作表"""
+        try:
+            logger = logging.getLogger(__name__)
+            # 获取销售记录工作表
+            sales_sheet = self.get_worksheet(SHEET_NAMES['sales'])
+            if not sales_sheet:
+                logger.error("无法获取销售记录工作表")
+                return 0
+            
+            # 获取所有销售数据
+            all_sales = sales_sheet.get_all_values()
+            if len(all_sales) <= 1:  # 没有数据或只有表头
+                logger.warning("销售记录工作表为空或只有表头")
+                return 0
+            
+            # 获取表头和数据
+            headers = all_sales[0]
+            
+            # 筛选出特定年份的数据
+            year_str = str(year)
+            year_data = []
+            archived_count = 0
+            
+            for row in all_sales[1:]:
+                if row and len(row) > 0 and row[0].startswith(year_str):  # 假设第一列是日期列
+                    # 确保行数据长度与表头一致
+                    if len(row) < len(headers):
+                        # 如果行数据不足，填充空字符串
+                        row = row + [""] * (len(headers) - len(row))
+                    elif len(row) > len(headers):
+                        # 如果行数据过长，截断
+                        row = row[:len(headers)]
+                    year_data.append(row)
+                    archived_count += 1
+            
+            # 将数据写入归档表
+            if year_data:
+                try:
+                    # 记录当前最大行数
+                    current_values = archive_sheet.get_all_values()
+                    current_row = len(current_values) + 2
+                    
+                    # 添加销售数据标题
+                    archive_sheet.update(f'A{current_row}', f"{year}年销售记录归档")
+                    archive_sheet.update(f'A{current_row+1}', f"共{len(year_data)}条记录")
+                    
+                    # 添加表头
+                    header_row = current_row + 3
+                    
+                    # 确定表头范围
+                    max_col = min(len(headers), 26)  # 限制最大列数为26（A-Z）
+                    col_range = chr(ord('A') + max_col - 1)
+                    
+                    # 更新表头（确保不超出范围）
+                    truncated_headers = headers[:max_col]
+                    archive_sheet.update(f'A{header_row}:{col_range}{header_row}', [truncated_headers])
+                    
+                    # 添加数据（确保不超出范围）
+                    if year_data:
+                        # 截断数据以匹配表头长度
+                        truncated_data = [row[:max_col] for row in year_data]
+                        
+                        data_start_row = header_row + 1
+                        data_end_row = data_start_row + len(truncated_data) - 1
+                        
+                        # 分批次更新数据，避免一次性更新过多
+                        batch_size = 100
+                        for i in range(0, len(truncated_data), batch_size):
+                            batch_end = min(i + batch_size, len(truncated_data))
+                            batch_data = truncated_data[i:batch_end]
+                            batch_start_row = data_start_row + i
+                            batch_end_row = batch_start_row + len(batch_data) - 1
+                            
+                            # 更新数据
+                            archive_sheet.update(f'A{batch_start_row}:{col_range}{batch_end_row}', batch_data)
+                            logger.info(f"已更新第{batch_start_row}-{batch_end_row}行数据")
+                    
+                    # 美化表格
+                    try:
+                        archive_sheet.format(f'A{current_row}:A{current_row+1}', {
+                            'textFormat': {'fontSize': 14, 'bold': True}
+                        })
+                        archive_sheet.format(f'A{header_row}:{col_range}{header_row}', {
+                            'textFormat': {'bold': True},
+                            'backgroundColor': {'red': 0.9, 'green': 0.9, 'blue': 0.9}
+                        })
+                    except Exception as format_err:
+                        logger.warning(f"表格美化失败（非关键错误）: {format_err}")
+                    
+                    logger.info(f"✅ 已归档{len(year_data)}条{year}年销售记录")
+                except Exception as update_err:
+                    logger.error(f"更新归档表时出错: {update_err}")
+                    # 尝试使用更简单的方法更新
+                    try:
+                        logger.info("尝试使用替代方法更新数据...")
+                        # 简单地将数据附加到工作表末尾
+                        archive_sheet.append_rows([
+                            [f"{year}年销售记录归档"],
+                            [f"共{len(year_data)}条记录"],
+                            [],
+                            headers,
+                            *year_data
+                        ])
+                        logger.info("使用替代方法更新成功")
+                    except Exception as alt_err:
+                        logger.error(f"替代更新方法也失败: {alt_err}")
+                        return 0
+            else:
+                logger.info(f"没有找到{year}年的销售记录")
+            
+            return archived_count
+            
+        except Exception as e:
+            logger.error(f"❌ 归档{year}年销售数据失败: {e}")
+            return 0
+    
+    def _archive_expense_data(self, year: int, archive_sheet) -> int:
+        """归档支出数据到指定工作表"""
+        try:
+            logger = logging.getLogger(__name__)
+            # 获取支出记录工作表
+            expense_sheet = self.get_worksheet(SHEET_NAMES['expenses'])
+            if not expense_sheet:
+                logger.error("无法获取支出记录工作表")
+                return 0
+            
+            # 获取所有支出数据
+            all_expenses = expense_sheet.get_all_values()
+            if len(all_expenses) <= 1:  # 没有数据或只有表头
+                logger.warning("支出记录工作表为空或只有表头")
+                return 0
+            
+            # 获取表头和数据
+            headers = all_expenses[0]
+            
+            # 筛选出特定年份的数据
+            year_str = str(year)
+            year_data = []
+            archived_count = 0
+            
+            for row in all_expenses[1:]:
+                if row and len(row) > 0 and row[0].startswith(year_str):  # 假设第一列是日期列
+                    # 确保行数据长度与表头一致
+                    if len(row) < len(headers):
+                        # 如果行数据不足，填充空字符串
+                        row = row + [""] * (len(headers) - len(row))
+                    elif len(row) > len(headers):
+                        # 如果行数据过长，截断
+                        row = row[:len(headers)]
+                    year_data.append(row)
+                    archived_count += 1
+            
+            # 将数据写入归档表
+            if year_data:
+                try:
+                    # 找到插入位置（在销售记录之后）
+                    all_archive_data = archive_sheet.get_all_values()
+                    current_row = len(all_archive_data) + 5  # 留出足够空间
+                    
+                    # 添加支出数据标题
+                    archive_sheet.update(f'A{current_row}', f"{year}年支出记录归档")
+                    archive_sheet.update(f'A{current_row+1}', f"共{len(year_data)}条记录")
+                    
+                    # 添加表头
+                    header_row = current_row + 3
+                    
+                    # 确定表头范围
+                    max_col = min(len(headers), 26)  # 限制最大列数为26（A-Z）
+                    col_range = chr(ord('A') + max_col - 1)
+                    
+                    # 更新表头（确保不超出范围）
+                    truncated_headers = headers[:max_col]
+                    archive_sheet.update(f'A{header_row}:{col_range}{header_row}', [truncated_headers])
+                    
+                    # 添加数据（确保不超出范围）
+                    if year_data:
+                        # 截断数据以匹配表头长度
+                        truncated_data = [row[:max_col] for row in year_data]
+                        
+                        data_start_row = header_row + 1
+                        data_end_row = data_start_row + len(truncated_data) - 1
+                        
+                        # 分批次更新数据，避免一次性更新过多
+                        batch_size = 100
+                        for i in range(0, len(truncated_data), batch_size):
+                            batch_end = min(i + batch_size, len(truncated_data))
+                            batch_data = truncated_data[i:batch_end]
+                            batch_start_row = data_start_row + i
+                            batch_end_row = batch_start_row + len(batch_data) - 1
+                            
+                            # 更新数据
+                            archive_sheet.update(f'A{batch_start_row}:{col_range}{batch_end_row}', batch_data)
+                            logger.info(f"已更新第{batch_start_row}-{batch_end_row}行数据")
+                    
+                    # 美化表格
+                    try:
+                        archive_sheet.format(f'A{current_row}:A{current_row+1}', {
+                            'textFormat': {'fontSize': 14, 'bold': True}
+                        })
+                        archive_sheet.format(f'A{header_row}:{col_range}{header_row}', {
+                            'textFormat': {'bold': True},
+                            'backgroundColor': {'red': 0.9, 'green': 0.9, 'blue': 0.9}
+                        })
+                    except Exception as format_err:
+                        logger.warning(f"表格美化失败（非关键错误）: {format_err}")
+                    
+                    logger.info(f"✅ 已归档{len(year_data)}条{year}年支出记录")
+                except Exception as update_err:
+                    logger.error(f"更新归档表时出错: {update_err}")
+                    # 尝试使用更简单的方法更新
+                    try:
+                        logger.info("尝试使用替代方法更新数据...")
+                        # 简单地将数据附加到工作表末尾
+                        archive_sheet.append_rows([
+                            [f"{year}年支出记录归档"],
+                            [f"共{len(year_data)}条记录"],
+                            [],
+                            headers,
+                            *year_data
+                        ])
+                        logger.info("使用替代方法更新成功")
+                    except Exception as alt_err:
+                        logger.error(f"替代更新方法也失败: {alt_err}")
+                        return 0
+            else:
+                logger.info(f"没有找到{year}年的支出记录")
+            
+            return archived_count
+            
+        except Exception as e:
+            logger.error(f"❌ 归档{year}年支出数据失败: {e}")
+            return 0
+    
+    def initialize_new_year(self, year: int) -> Dict[str, Any]:
+        """初始化新年度数据和报表
+        
+        为新的一年准备必要的报表模板和数据结构
+        
+        Args:
+            year: 要初始化的年份
+            
+        Returns:
+            包含初始化结果的字典
+        """
+        try:
+            logger = logging.getLogger(__name__)
+            logger.info(f"开始初始化{year}年数据环境...")
+            result = {
+                'initialized_reports': []
+            }
+            
+            # 1. 预创建年度报表
+            reports = [
+                ('sales', self.export_sales_report(year)),
+                ('expenses', self.export_expenses_report(year)),
+                ('pl', self.export_pl_report(year))
+            ]
+            
+            # 记录创建的报表
+            for report_type, report_result in reports:
+                if report_result and 'sheet_name' in report_result:
+                    result['initialized_reports'].append(report_result['sheet_name'])
+            
+            # 2. 创建年度工作区索引
+            workspace_sheet_name = f"Workspace {year}"
+            try:
+                workspace_sheet = self.spreadsheet.worksheet(workspace_sheet_name)
+                logger.info(f"工作区索引表已存在: {workspace_sheet_name}")
+            except:
+                workspace_sheet = self.spreadsheet.add_worksheet(
+                    title=workspace_sheet_name, rows=100, cols=10
+                )
+                logger.info(f"创建工作区索引表: {workspace_sheet_name}")
+                
+                # 添加索引表标题和说明
+                workspace_sheet.update('A1', f"{year}年工作区")
+                workspace_sheet.update('A2', f"创建时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                workspace_sheet.update('A4', "此工作表包含当前年度报表的索引和链接:")
+                
+                # 添加报表链接
+                row = 6
+                for _, report_result in reports:
+                    if report_result and 'sheet_name' in report_result and 'sheet_url' in report_result:
+                        # 添加报表链接
+                        workspace_sheet.update(f'A{row}', report_result['sheet_name'])
+                        workspace_sheet.update(f'B{row}', f'=HYPERLINK("{report_result["sheet_url"]}","点击查看")')
+                        row += 1
+                
+                # 添加说明
+                workspace_sheet.update(f'A{row+2}', "数据记录表:")
+                workspace_sheet.update(f'A{row+3}', "- 销售记录")
+                workspace_sheet.update(f'A{row+4}', "- 支出记录")
+                
+                # 美化表格
+                workspace_sheet.format('A1:A2', {
+                    'textFormat': {'fontSize': 14, 'bold': True}
+                })
+                
+                result['initialized_reports'].append(workspace_sheet_name)
+            
+            logger.info(f"✅ {year}年数据环境初始化完成")
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ 初始化{year}年数据环境失败: {e}")
             return None
 
 
