@@ -1791,27 +1791,29 @@ async def report_pl_sync(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     query = update.callback_query
     await query.answer()
     
+    period = query.data.split("_")[3]  # 格式为 "pl_sync_yyyy" 或 "pl_sync_yyyy-mm"
+    
+    # 发送处理中的消息
+    await query.edit_message_text(
+        "⏳ 正在同步损益表到Google表格，请稍候...",
+        parse_mode=ParseMode.MARKDOWN
+    )
+    
+    # 判断是年度还是月度
+    is_yearly = len(period) == 4  # 年份格式为4位数字
+    
+    sheets_manager = SheetsManager()
+    
     try:
-        # 从回调数据中提取期间
-        period = query.data.replace("pl_sync_", "")
-        
-        # 发送处理中的消息
-        await query.edit_message_text(
-            "⏳ 正在同步损益表到Google表格，请稍候...",
-            parse_mode=ParseMode.MARKDOWN
-        )
-        
-        # 判断是年度还是月度
-        is_yearly = len(period) == 4  # 年份格式为4位数字
-        
-        sheets_manager = SheetsManager()
-        
+        # 直接使用export_pl_report导出损益表（替换之前的sync函数）
         if is_yearly:
-            # 同步年度损益表
-            result = await sheets_manager.sync_yearly_pl_to_sheet(int(period))
+            # 导出年度损益表
+            result = sheets_manager.export_pl_report(int(period))
         else:
-            # 同步月度损益表
-            result = await sheets_manager.sync_monthly_pl_to_sheet(period)
+            # 对于月度报表，提取年份
+            year = int(period.split('-')[0])
+            # 导出该年的损益表
+            result = sheets_manager.export_pl_report(year)
         
         # 显示同步结果
         keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="report_pl")]]
@@ -1819,25 +1821,26 @@ async def report_pl_sync(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         
         if result:
             await query.edit_message_text(
-                f"✅ 损益表已成功同步到Google表格\n\n📊 工作表: {result['sheet_name']}\n📑 标签页: {result['tab_name']}",
+                f"✅ 损益表已成功导出到Google表格\n\n📊 工作表: {result['sheet_name']}\n🔗 [点击查看报表]({result['sheet_url']})",
                 parse_mode=ParseMode.MARKDOWN,
-                reply_markup=reply_markup
+                reply_markup=reply_markup,
+                disable_web_page_preview=True
             )
         else:
             await query.edit_message_text(
-                "❌ 同步失败，请重试",
+                "❌ 导出失败，请重试",
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=reply_markup
             )
-        
+    
     except Exception as e:
-        logger.error(f"同步损益表失败: {e}")
+        logger.error(f"导出损益表失败: {e}")
         
         keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="report_pl")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
-            "❌ 同步损益表失败，请重试",
+            "❌ 导出损益表失败，请重试",
             reply_markup=reply_markup
         )
     
