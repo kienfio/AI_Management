@@ -19,8 +19,7 @@ SHEET_NAMES = {
     'agents': 'Agents Management',
     'suppliers': 'Suppliers Management',
     'workers': 'Workers Management',
-    'pic': 'Person in Charge',
-    'pl': 'P&L Reports'  # 添加损益表工作表
+    'pic': 'Person in Charge'
 }
 
 SALES_HEADERS = ['Date', 'PIC', 'Invoice NO', 'Bill To', 'Amount', 'Status', 'Type', 'Agent Name', 'IC', 'Comm Rate', 'Comm Amount', 'Invoice PDF']
@@ -29,11 +28,6 @@ AGENTS_HEADERS = ['Name', 'IC', 'Phone']
 SUPPLIERS_HEADERS = ['Name', 'Contact', 'Phone', 'Email', 'Products/Services', 'Status']
 WORKERS_HEADERS = ['Name', 'Contact', 'Phone', 'Position', 'Status']
 PICS_HEADERS = ['Name', 'Contact', 'Phone', 'Department', 'Status']
-
-# 添加 P&L 报表表头
-PL_HEADERS = ['Period', 'Revenue', 'Cost of Goods', 'Commission', 'Gross Profit', 
-              'Salary Expense', 'Utility Expense', 'Other Expense', 'Total Operating Expense', 
-              'Net Profit', 'Profit Margin (%)']
 
 # LHDN 税务汇总表头已移除
 
@@ -170,8 +164,6 @@ class GoogleSheetsManager:
                     worksheet.append_row(WORKERS_HEADERS)
                 elif sheet_key == 'pic':
                     worksheet.append_row(PICS_HEADERS)
-                elif sheet_key == 'pl':
-                    worksheet.append_row(PL_HEADERS)
                 
                 logger.info(f"✅ 创建工作表: {sheet_name}")
     
@@ -835,138 +827,6 @@ class GoogleSheetsManager:
                 'net_profit': 0,
                 'profit_margin': 0
             }
-
-    def sync_monthly_pl_to_sheet(self, month: str) -> Dict[str, Any]:
-        """同步月度损益表到Google表格"""
-        try:
-            # 生成损益表数据
-            pl_data = self.generate_pl_report(month)
-                
-            # 获取P&L工作表
-            worksheet = self.get_worksheet(SHEET_NAMES['pl'])
-            if not worksheet:
-                logger.error("❌ 获取P&L工作表失败")
-                return None
-            
-            # 检查是否已存在该月份的数据
-            all_values = worksheet.get_all_values()
-            if len(all_values) > 1:  # 有表头和数据
-                for i, row in enumerate(all_values[1:], start=2):  # 从第2行开始（跳过表头）
-                    if row[0] == month:  # 第一列是期间
-                        # 更新现有行
-                        row_data = [
-                            pl_data['period'],
-                            pl_data['revenue'],
-                            pl_data['cost_of_goods'],
-                            pl_data['commission_cost'],
-                            pl_data['gross_profit'],
-                            pl_data['salary_expense'],
-                            pl_data['utility_expense'],
-                            pl_data['other_expense'],
-                            pl_data['total_operating_expense'],
-                            pl_data['net_profit'],
-                            f"{pl_data['profit_margin']:.1f}%"
-                        ]
-                        worksheet.update(f'A{i}:K{i}', [row_data])
-                        logger.info(f"✅ 更新月度损益表成功: {month}")
-                        return {
-                            'sheet_name': SHEET_NAMES['pl'],
-                            'tab_name': 'Monthly P&L',
-                            'period': month
-                        }
-            
-            # 如果不存在，添加新行
-            row_data = [
-                pl_data['period'],
-                pl_data['revenue'],
-                pl_data['cost_of_goods'],
-                pl_data['commission_cost'],
-                pl_data['gross_profit'],
-                pl_data['salary_expense'],
-                pl_data['utility_expense'],
-                pl_data['other_expense'],
-                pl_data['total_operating_expense'],
-                pl_data['net_profit'],
-                f"{pl_data['profit_margin']:.1f}%"
-            ]
-            worksheet.append_row(row_data)
-            logger.info(f"✅ 添加月度损益表成功: {month}")
-            
-            return {
-                'sheet_name': SHEET_NAMES['pl'],
-                'tab_name': 'Monthly P&L',
-                'period': month
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ 同步月度损益表失败: {e}")
-            return None
-
-    def sync_yearly_pl_to_sheet(self, year: int) -> Dict[str, Any]:
-        """同步年度损益表到Google表格"""
-        try:
-            # 生成年度损益表数据
-            pl_data = self.generate_yearly_pl_report(year)
-                
-            # 获取P&L工作表
-            worksheet = self.get_worksheet(SHEET_NAMES['pl'])
-            if not worksheet:
-                logger.error("❌ 获取P&L工作表失败")
-                return None
-            
-            # 检查是否已存在该年份的数据
-            all_values = worksheet.get_all_values()
-            if len(all_values) > 1:  # 有表头和数据
-                for i, row in enumerate(all_values[1:], start=2):  # 从第2行开始（跳过表头）
-                    if row[0] == str(year):  # 第一列是期间
-                        # 更新现有行
-                        row_data = [
-                            pl_data['period'],
-                            pl_data['revenue'],
-                            pl_data['cost_of_goods'],
-                            pl_data['commission_cost'],
-                            pl_data['gross_profit'],
-                            pl_data['salary_expense'],
-                            pl_data['utility_expense'],
-                            pl_data['other_expense'],
-                            pl_data['total_operating_expense'],
-                            pl_data['net_profit'],
-                            f"{pl_data['profit_margin']:.1f}%"
-                        ]
-                        worksheet.update(f'A{i}:K{i}', [row_data])
-                        logger.info(f"✅ 更新年度损益表成功: {year}")
-                        return {
-                            'sheet_name': SHEET_NAMES['pl'],
-                            'tab_name': 'Yearly P&L',
-                            'period': str(year)
-                        }
-            
-            # 如果不存在，添加新行
-            row_data = [
-                pl_data['period'],
-                pl_data['revenue'],
-                pl_data['cost_of_goods'],
-                pl_data['commission_cost'],
-                pl_data['gross_profit'],
-                pl_data['salary_expense'],
-                pl_data['utility_expense'],
-                pl_data['other_expense'],
-                pl_data['total_operating_expense'],
-                pl_data['net_profit'],
-                f"{pl_data['profit_margin']:.1f}%"
-            ]
-            worksheet.append_row(row_data)
-            logger.info(f"✅ 添加年度损益表成功: {year}")
-            
-            return {
-                'sheet_name': SHEET_NAMES['pl'],
-                'tab_name': 'Yearly P&L',
-                'period': str(year)
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ 同步年度损益表失败: {e}")
-            return None
 
     # =============================================================================
     # 报表导出功能
