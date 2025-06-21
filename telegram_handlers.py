@@ -786,18 +786,17 @@ async def sales_list_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # ====================================
 
 async def cost_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """费用管理主菜单"""
-    await close_other_conversations(update, context)
-    
+    """显示费用管理菜单"""
     query = update.callback_query
     await query.answer()
     
+    # 清除用户数据
+    context.user_data.clear()
+    
     keyboard = [
         [InlineKeyboardButton("🛒 Purchasing", callback_data="cost_purchasing")],
-        [InlineKeyboardButton("💰 Worker Salary", callback_data="cost_salary")],
-        [InlineKeyboardButton("📄 Billing", callback_data="cost_billing")],
-        [InlineKeyboardButton("📝 Other", callback_data="cost_other")],
-        [InlineKeyboardButton("📋 View Cost Records", callback_data="cost_list")],
+        [InlineKeyboardButton("💳 Billing", callback_data="cost_billing")],
+        [InlineKeyboardButton("👨‍💼 Worker Salary", callback_data="cost_salary")],
         [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="back_main")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1041,6 +1040,9 @@ async def custom_supplier_handler(update: Update, context: ContextTypes.DEFAULT_
     supplier_name = update.message.text.strip()
     context.user_data['cost_supplier'] = supplier_name
     
+    # 标记这是自定义供应商，以便上传照片时使用特定文件夹
+    context.user_data['is_custom_supplier'] = True
+    
     # 清除等待标记
     context.user_data.pop('waiting_for_custom_supplier', None)
     
@@ -1206,6 +1208,11 @@ async def cost_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         # 转换为小写进行匹配
         cost_type_lower = cost_type.lower()
         drive_folder_type = type_mapping.get(cost_type_lower, cost_type)
+        
+        # 检查是否是自定义供应商，如果是则使用supplier_other文件夹
+        if context.user_data.get('is_custom_supplier') and cost_type == "Purchasing":
+            drive_folder_type = "supplier_other"
+            logger.info("检测到自定义供应商，使用supplier_other文件夹")
         
         # 添加日志，记录映射后的类型
         logger.info(f"映射后的文件夹类型: {drive_folder_type}")
