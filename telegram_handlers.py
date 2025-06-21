@@ -2124,6 +2124,14 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     elif query.data == "menu_help":
         await help_command(update, context)
         return ConversationHandler.END
+    elif query.data == "archive_pnl":
+        # 归档功能回调
+        logger.info("归档功能回调被触发，转发到 archive_pnl_records_handler")
+        return await archive_pnl_records_handler(update, context)
+    elif query.data.startswith("confirm_archive_"):
+        # 归档确认回调
+        logger.info("归档确认回调被触发，转发到 confirm_archive_handler")
+        return await confirm_archive_handler(update, context)
     
     # 销售记录回调
     elif query.data == "back_sales":
@@ -2283,18 +2291,23 @@ def get_conversation_handlers():
     setting_conversation = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(setting_category_handler, pattern="^setting_create_"),
+            CallbackQueryHandler(archive_pnl_records_handler, pattern="^archive_pnl$"),
             CommandHandler("Setting", setting_command),
             # 添加菜单入口点 - 使用专门的处理函数
             CallbackQueryHandler(menu_setting_handler, pattern="^menu_setting$")
         ],
         states={
-            SETTING_CATEGORY: [CallbackQueryHandler(setting_category_handler, pattern="^setting_create_")],
+            SETTING_CATEGORY: [
+                CallbackQueryHandler(setting_category_handler, pattern="^setting_create_"),
+                CallbackQueryHandler(archive_pnl_records_handler, pattern="^archive_pnl$")
+            ],
             SETTING_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, setting_name_handler)],
             SETTING_IC: [MessageHandler(filters.TEXT & ~filters.COMMAND, setting_ic_handler)],
             SETTING_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, setting_type_handler)],
             SETTING_RATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, setting_rate_handler)]
         },
         fallbacks=[
+            CallbackQueryHandler(confirm_archive_handler, pattern="^confirm_archive_\\d+$"),
             CallbackQueryHandler(callback_query_handler),
             CommandHandler("cancel", cancel_command)
         ],
@@ -2450,16 +2463,18 @@ def register_handlers(application):
     application.add_handler(CommandHandler("SaleInvoice", sale_invoice_command))
     application.add_handler(CommandHandler("report", report_command))  # 添加 /report 命令处理器
     
-    # 归档功能处理器
+    # 回调查询处理器 (放在会话处理器之后)
+    # 归档功能处理器 - 优先级高于其他回调处理器
     application.add_handler(CallbackQueryHandler(archive_pnl_records_handler, pattern='^archive_pnl$'))
     application.add_handler(CallbackQueryHandler(confirm_archive_handler, pattern='^confirm_archive_\d+$'))
     
-    # 回调查询处理器 (放在会话处理器之后)
     application.add_handler(CallbackQueryHandler(sales_callback_handler, pattern='^sales_'))
     application.add_handler(CallbackQueryHandler(expenses_callback_handler, pattern='^(cost_|expenses_)'))
     application.add_handler(CallbackQueryHandler(report_callback_handler, pattern='^report_'))
     application.add_handler(CallbackQueryHandler(report_callback_handler, pattern='^export_'))  # 添加报表导出回调处理器
     application.add_handler(CallbackQueryHandler(close_session_handler, pattern='^close_session$'))
+    
+    # 通用回调处理器 - 放在最后，捕获所有未被前面处理器捕获的回调
     application.add_handler(CallbackQueryHandler(general_callback_handler))
     
     # 文本消息处理器
@@ -3927,6 +3942,10 @@ async def perform_archive_operation(year: int) -> Dict[str, Any]:
         Dict: 包含操作结果的字典
     """
     try:
+        # 记录开始时间
+        start_time = datetime.now()
+        logger.info(f"开始归档 {year} 年数据，时间: {start_time}")
+        
         # 初始化结果字典
         result = {
             'success': False,
@@ -3938,72 +3957,98 @@ async def perform_archive_operation(year: int) -> Dict[str, Any]:
         }
         
         # 1. 获取需要归档的销售和支出记录
+        logger.info(f"正在获取 {year} 年的销售和支出记录...")
         sales_records = filter_records_by_year(sheets_manager.get_sales_records(), year)
         expense_records = filter_records_by_year(sheets_manager.get_expense_records(), year)
         
         # 记录数量
         result['sales_count'] = len(sales_records)
         result['expense_count'] = len(expense_records)
+        logger.info(f"找到 {result['sales_count']} 条销售记录和 {result['expense_count']} 条支出记录")
         
         # 如果没有记录，提前返回
         if len(sales_records) == 0 and len(expense_records) == 0:
             result['error'] = f"未找到 {year} 年的记录，无需归档。"
+            logger.info(result['error'])
             return result
         
         # 2. 创建归档表格
         archive_sheet_name = f"Finance Archive {year}"
         result['archive_sheet_name'] = archive_sheet_name
+        logger.info(f"正在创建归档表格: {archive_sheet_name}...")
         
         # 创建归档表格并复制数据
         await create_archive_sheet(archive_sheet_name, sales_records, expense_records)
+        logger.info(f"归档表格创建成功")
         
         # 3. 归档文件到指定文件夹
+        logger.info("正在归档文件到指定文件夹...")
         archive_folder_id = os.getenv('DRIVE_FOLDER_ARCHIVE_REPORTS')
         if not archive_folder_id:
             archive_folder_id = "1UrthNTCehUASNE9_3Oe_9SbFT-6lpkyp"  # 使用默认ID
+            logger.info(f"使用默认归档文件夹ID: {archive_folder_id}")
+        else:
+            logger.info(f"使用环境变量中的归档文件夹ID: {archive_folder_id}")
             
         # 获取 Drive 上传器实例
         drive_uploader = get_drive_uploader()
+        logger.info("已获取 Drive 上传器实例")
         
         # 归档收据和发票文件
         archived_files_count = 0
         
         # 归档销售记录中的发票 PDF
-        for record in sales_records:
+        logger.info("正在归档销售记录中的发票 PDF...")
+        for i, record in enumerate(sales_records):
             invoice_pdf_link = record.get('invoice_pdf', '')
             if invoice_pdf_link and 'drive.google.com' in invoice_pdf_link:
                 try:
                     # 从链接中提取文件 ID
                     file_id = extract_file_id_from_link(invoice_pdf_link)
                     if file_id:
+                        logger.info(f"正在归档发票 PDF 文件 ({i+1}/{len(sales_records)}): {file_id}")
                         # 归档文件
                         drive_uploader.archive_file(file_id, year)
                         archived_files_count += 1
+                        logger.info(f"发票 PDF 文件归档成功: {file_id}")
                 except Exception as e:
                     logger.warning(f"归档发票 PDF 文件失败: {e}")
         
         # 归档支出记录中的收据
-        for record in expense_records:
+        logger.info("正在归档支出记录中的收据...")
+        for i, record in enumerate(expense_records):
             receipt_link = record.get('receipt', '')
             if receipt_link and 'drive.google.com' in receipt_link:
                 try:
                     # 从链接中提取文件 ID
                     file_id = extract_file_id_from_link(receipt_link)
                     if file_id:
+                        logger.info(f"正在归档收据文件 ({i+1}/{len(expense_records)}): {file_id}")
                         # 归档文件
                         drive_uploader.archive_file(file_id, year)
                         archived_files_count += 1
+                        logger.info(f"收据文件归档成功: {file_id}")
                 except Exception as e:
                     logger.warning(f"归档收据文件失败: {e}")
         
         result['archived_files'] = archived_files_count
+        logger.info(f"已成功归档 {archived_files_count} 个文件")
         
         # 4. 创建下一年度的表格
         next_year = year + 1
+        logger.info(f"正在创建 {next_year} 年的表格...")
         await create_next_year_sheet(next_year)
+        logger.info(f"{next_year} 年的表格创建成功")
         
         # 5. 删除原表格中的记录
+        logger.info(f"正在删除原表格中 {year} 年的记录...")
         await delete_records_by_year(year)
+        logger.info(f"原表格中 {year} 年的记录已删除")
+        
+        # 记录结束时间和总用时
+        end_time = datetime.now()
+        duration = end_time - start_time
+        logger.info(f"归档操作完成，总用时: {duration}")
         
         # 标记成功
         result['success'] = True
@@ -4030,25 +4075,47 @@ def extract_file_id_from_link(link: str) -> str:
         str: 文件 ID，如果无法提取则返回空字符串
     """
     try:
+        if not link:
+            logger.warning("链接为空，无法提取文件 ID")
+            return ""
+            
+        logger.info(f"尝试从链接提取文件 ID: {link}")
+        
         # 处理不同格式的 Google Drive 链接
         if '/file/d/' in link:
             # 格式: https://drive.google.com/file/d/FILE_ID/view
             file_id = link.split('/file/d/')[1].split('/')[0]
+            logger.info(f"从 /file/d/ 格式链接提取到文件 ID: {file_id}")
         elif 'id=' in link:
             # 格式: https://drive.google.com/open?id=FILE_ID
             file_id = link.split('id=')[1].split('&')[0]
+            logger.info(f"从 id= 格式链接提取到文件 ID: {file_id}")
         elif '/d/' in link and '/edit' in link:
             # 格式: https://docs.google.com/document/d/FILE_ID/edit
             file_id = link.split('/d/')[1].split('/edit')[0]
+            logger.info(f"从 /d/...edit 格式链接提取到文件 ID: {file_id}")
         elif '/d/' in link and '/view' in link:
             # 格式: https://drive.google.com/d/FILE_ID/view
             file_id = link.split('/d/')[1].split('/view')[0]
+            logger.info(f"从 /d/...view 格式链接提取到文件 ID: {file_id}")
+        elif '/d/' in link:
+            # 格式: https://drive.google.com/d/FILE_ID (无 view 或 edit)
+            parts = link.split('/d/')[1].split('/')
+            file_id = parts[0]
+            logger.info(f"从 /d/ 格式链接提取到文件 ID: {file_id}")
         else:
             # 无法识别的格式
-            logger.warning(f"无法从链接中提取文件 ID: {link}")
+            logger.warning(f"无法从链接中提取文件 ID，未知格式: {link}")
             return ""
         
-        return file_id
+        # 验证文件 ID 格式
+        if file_id and len(file_id) >= 25:  # Google Drive 文件 ID 通常很长
+            logger.info(f"成功提取文件 ID: {file_id}")
+            return file_id
+        else:
+            logger.warning(f"提取的文件 ID 格式不正确: {file_id}")
+            return ""
+            
     except Exception as e:
         logger.warning(f"提取文件 ID 失败: {e}, 链接: {link}")
         return ""
