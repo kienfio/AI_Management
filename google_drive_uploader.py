@@ -50,7 +50,8 @@ class GoogleDriveUploader:
             "Purchasing": os.getenv('DRIVE_FOLDER_PURCHASING'),    # 购买杂货收据文件夹
             "wifi": os.getenv('DRIVE_FOLDER_WIFI'),                # WiFi收据文件夹
             "invoice_pdf": os.getenv('DRIVE_FOLDER_INVOICE_PDF'),   # 发票PDF文件夹
-            "supplier_other": "1FfbkRk2v2eBR9FWAKShefxIVBlQjaWrA"  # Purchasing > Other的自定义供应商文件夹
+            "supplier_other": "1FfbkRk2v2eBR9FWAKShefxIVBlQjaWrA",  # Purchasing > Other的自定义供应商文件夹
+            "archive": os.getenv('DRIVE_FOLDER_ARCHIVE_REPORTS', '1UrthNTCehUASNE9_3Oe_9SbFT-6lpkyp')  # 归档文件夹
         }
         logger.info(f"已初始化文件夹ID映射: {self.FOLDER_IDS}")
     
@@ -458,6 +459,69 @@ class GoogleDriveUploader:
         mime_type = mime_types.get(extension, 'application/octet-stream')
         logger.info(f"文件 {file_path} 使用MIME类型: {mime_type}")
         return mime_type
+        
+    def archive_file(self, file_id: str, year: int) -> Dict[str, str]:
+        """
+        将文件移动到归档文件夹
+        
+        Args:
+            file_id: 要移动的文件ID
+            year: 归档年份，用于重命名文件
+            
+        Returns:
+            Dict: 包含文件ID和公开链接的字典
+        """
+        try:
+            logger.info(f"开始归档文件: {file_id}, 年份: {year}")
+            
+            # 获取归档文件夹ID
+            archive_folder_id = self.FOLDER_IDS.get("archive")
+            if not archive_folder_id:
+                archive_folder_id = os.getenv('DRIVE_FOLDER_ARCHIVE_REPORTS')
+                if not archive_folder_id:
+                    archive_folder_id = "1UrthNTCehUASNE9_3Oe_9SbFT-6lpkyp"  # 默认归档文件夹ID
+            
+            logger.info(f"使用归档文件夹ID: {archive_folder_id}")
+            
+            # 获取文件信息
+            file = self.drive_service.files().get(fileId=file_id, fields='name,parents').execute()
+            file_name = file.get('name', '')
+            
+            # 添加年份前缀到文件名
+            new_name = f"{year}_{file_name}"
+            
+            # 更新文件元数据（移动到归档文件夹并重命名）
+            file = self.drive_service.files().update(
+                fileId=file_id,
+                body={
+                    'name': new_name,
+                    'parents': [archive_folder_id]
+                },
+                fields='id, webViewLink',
+                # 移除当前父文件夹
+                removeParents=','.join(file.get('parents', []))
+            ).execute()
+            
+            file_id = file.get('id')
+            public_link = file.get('webViewLink', '')
+            
+            logger.info(f"文件归档成功: {file_id}, 新名称: {new_name}, 新链接: {public_link}")
+            
+            return {
+                'file_id': file_id,
+                'public_link': public_link
+            }
+            
+        except Exception as e:
+            logger.error(f"归档文件失败: {e}")
+            # 如果是HTTP错误，记录响应内容
+            if hasattr(e, 'content'):
+                try:
+                    error_details = json.loads(e.content)
+                    logger.error(f"Google API错误详情: {error_details}")
+                except:
+                    logger.error(f"原始错误响应: {e.content}")
+            raise
 
 
 # 创建全局实例，但不立即初始化
