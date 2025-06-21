@@ -25,15 +25,6 @@ from google_sheets import GoogleSheetsManager as SheetsManager
 # 设置日志
 logger = logging.getLogger(__name__)
 
-# 尝试导入年度自动化任务相关模块
-try:
-    from scheduled_tasks import task_manager, manual_archive, manual_initialize
-    HAS_SCHEDULER = True
-except ImportError:
-    # 如果不可用，不要阻止程序运行
-    HAS_SCHEDULER = False
-    logger.warning("未找到scheduled_tasks模块，年度自动化功能将不可用")
-
 # ====================================
 # 会话状态区 - ConversationHandler 状态定义
 # ====================================
@@ -66,8 +57,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     context.user_data.clear()
     
     keyboard = [
-        [InlineKeyboardButton("📊 Sale Invoice1", callback_data="sales_add")],
-        [InlineKeyboardButton("💵 Coastin2g", callback_data="menu_cost")],
+        [InlineKeyboardButton("📊 Sale Invoice", callback_data="sales_add")],
+        [InlineKeyboardButton("💵 Coasting", callback_data="menu_cost")],
         [InlineKeyboardButton("📈 Report", callback_data="menu_report")],
         [InlineKeyboardButton("⚙️ Setting", callback_data="menu_setting")],
         [InlineKeyboardButton("❓ Help", callback_data="menu_help")]
@@ -2129,14 +2120,6 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     elif query.data == "export_pl":
         return await report_export_handler(update, context)
     
-    # 年度管理回调
-    elif query.data == "year_management":
-        return await year_management_menu(update, context)
-    elif query.data.startswith("year_archive_"):
-        return await year_archive_handler(update, context)
-    elif query.data.startswith("year_init_"):
-        return await year_initialize_handler(update, context)
-    
     # 默认返回主菜单
     else:
         await start_command(update, context)
@@ -3014,7 +2997,6 @@ async def menu_setting_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         [InlineKeyboardButton("🏭  Create Supplier", callback_data="setting_create_supplier")],
         [InlineKeyboardButton("👷  Create Worker", callback_data="setting_create_worker")],
         [InlineKeyboardButton("👑  Create Person in Charge", callback_data="setting_create_pic")],
-        [InlineKeyboardButton("📅  Year Data Management", callback_data="year_management")],
         [InlineKeyboardButton("🔙  Back to Main Menu", callback_data="back_main")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -3743,170 +3725,3 @@ async def report_yearly_handler(update: Update, context: ContextTypes.DEFAULT_TY
     except Exception as e:
         logger.error(f"生成年度报表失败: {e}")
         await query.edit_message_text("❌ 生成报表失败，请重试")
-
-# ====================================
-# 年度管理功能 - 年度归档和新年初始化
-# ====================================
-
-async def year_management_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """显示年度管理菜单"""
-    query = update.callback_query
-    await query.answer()
-    
-    if not HAS_SCHEDULER:
-        # 如果调度器模块不可用，显示错误信息
-        keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="menu_setting")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            "❌ 年度自动化管理功能不可用\n\n请确保已安装所需模块并配置正确",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=reply_markup
-        )
-        return ConversationHandler.END
-    
-    # 构建年份选择按钮
-    current_year = datetime.now().year
-    year_buttons = []
-    
-    # 显示去年、今年、明年的按钮
-    for year in range(current_year - 1, current_year + 2):
-        year_buttons.append([
-            InlineKeyboardButton(f"📁 归档 {year}年数据", callback_data=f"year_archive_{year}"),
-            InlineKeyboardButton(f"📊 初始化 {year+1}年", callback_data=f"year_init_{year+1}")
-        ])
-    
-    # 添加返回按钮
-    year_buttons.append([InlineKeyboardButton("🔙 返回设置菜单", callback_data="menu_setting")])
-    
-    reply_markup = InlineKeyboardMarkup(year_buttons)
-    
-    message = """
-📅 *年度数据管理*
-
-您可以执行以下操作:
-
-1. *归档年度数据* - 将指定年份的数据归档保存
-2. *初始化新年度* - 为新的一年创建必要的报表结构
-
-系统已配置在每年 12月31日 和 1月1日 自动执行这些任务。
-您也可以通过以下按钮手动执行这些操作:
-"""
-    
-    await query.edit_message_text(
-        message,
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=reply_markup
-    )
-    
-    return ConversationHandler.END
-
-async def year_archive_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理年度归档请求"""
-    query = update.callback_query
-    await query.answer()
-    
-    # 从回调数据中提取年份
-    try:
-        year = int(query.data.split('_')[2])
-    except (IndexError, ValueError):
-        year = datetime.now().year - 1  # 默认归档去年的数据
-    
-    # 发送处理中的消息
-    await query.edit_message_text(
-        f"⏳ 正在归档 {year}年 数据，请稍候...\n\n这可能需要几分钟时间，取决于数据量。",
-        parse_mode=ParseMode.MARKDOWN
-    )
-    
-    try:
-        # 执行归档任务
-        result = manual_archive(year)
-        
-        # 构建返回按钮
-        keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="year_management")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        if result:
-            # 归档成功
-            await query.edit_message_text(
-                f"✅ *{year}年数据归档成功*\n\n已创建数据归档和报表索引。\n\n您可以在Google表格中查看以下工作表:\n- Data Archive {year}\n- Archives {year}",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=reply_markup
-            )
-        else:
-            # 归档失败
-            await query.edit_message_text(
-                f"❌ {year}年数据归档失败\n\n请检查日志以获取详细信息",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=reply_markup
-            )
-    
-    except Exception as e:
-        logger.error(f"年度归档失败: {e}")
-        
-        # 构建返回按钮
-        keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="year_management")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            f"❌ 执行归档任务时出错:\n\n`{str(e)[:200]}`",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=reply_markup
-        )
-    
-    return ConversationHandler.END
-
-async def year_initialize_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理新年度初始化请求"""
-    query = update.callback_query
-    await query.answer()
-    
-    # 从回调数据中提取年份
-    try:
-        year = int(query.data.split('_')[2])
-    except (IndexError, ValueError):
-        year = datetime.now().year + 1  # 默认初始化明年
-    
-    # 发送处理中的消息
-    await query.edit_message_text(
-        f"⏳ 正在初始化 {year}年 数据环境，请稍候...",
-        parse_mode=ParseMode.MARKDOWN
-    )
-    
-    try:
-        # 执行初始化任务
-        result = manual_initialize(year)
-        
-        # 构建返回按钮
-        keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="year_management")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        if result:
-            # 初始化成功
-            await query.edit_message_text(
-                f"✅ *{year}年数据环境初始化成功*\n\n已创建以下报表:\n- Sales Report {year}\n- Expenses Report {year}\n- P&L Report {year}\n- Workspace {year}",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=reply_markup
-            )
-        else:
-            # 初始化失败
-            await query.edit_message_text(
-                f"❌ {year}年数据环境初始化失败\n\n请检查日志以获取详细信息",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=reply_markup
-            )
-    
-    except Exception as e:
-        logger.error(f"年度初始化失败: {e}")
-        
-        # 构建返回按钮
-        keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="year_management")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            f"❌ 执行初始化任务时出错:\n\n`{str(e)[:200]}`",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=reply_markup
-        )
-    
-    return ConversationHandler.END
