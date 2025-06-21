@@ -6,7 +6,7 @@ import base64
 import json
 from typing import Dict, Optional, Union, BinaryIO
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload
+from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload, MediaIoBaseDownload
 from google.oauth2 import service_account
 from google.oauth2.credentials import Credentials
 import mimetypes
@@ -462,14 +462,14 @@ class GoogleDriveUploader:
         
     def archive_file(self, file_id: str, year: int) -> Dict[str, str]:
         """
-        将文件移动到归档文件夹
+        将文件复制到归档文件夹（不移动原文件）
         
         Args:
-            file_id: 要移动的文件ID
+            file_id: 要归档的文件ID
             year: 归档年份，用于重命名文件
             
         Returns:
-            Dict: 包含文件ID和公开链接的字典
+            Dict: 包含新文件ID和公开链接的字典
         """
         try:
             logger.info(f"开始归档文件: {file_id}, 年份: {year}")
@@ -483,34 +483,116 @@ class GoogleDriveUploader:
             
             logger.info(f"使用归档文件夹ID: {archive_folder_id}")
             
+            try:
+                # 验证归档文件夹是否存在
+                self.drive_service.files().get(fileId=archive_folder_id).execute()
+                logger.info(f"归档文件夹存在，ID: {archive_folder_id}")
+            except Exception as folder_error:
+                logger.error(f"归档文件夹不存在或无权访问: {folder_error}")
+                # 尝试创建归档文件夹
+                try:
+                    folder_metadata = {
+                        'name': f'Finance Archive {year}',
+                        'mimeType': 'application/vnd.google-apps.folder'
+                    }
+                    created_folder = self.drive_service.files().create(
+                        body=folder_metadata, fields='id'
+                    ).execute()
+                    archive_folder_id = created_folder.get('id')
+                    logger.info(f"已创建新的归档文件夹，ID: {archive_folder_id}")
+                except Exception as create_error:
+                    logger.error(f"无法创建归档文件夹: {create_error}")
+                    raise
+            
             # 获取文件信息
-            file = self.drive_service.files().get(fileId=file_id, fields='name,parents').execute()
-            file_name = file.get('name', '')
+            try:
+                file = self.drive_service.files().get(fileId=file_id, fields='name,mimeType').execute()
+                file_name = file.get('name', '')
+                mime_type = file.get('mimeType', 'application/octet-stream')
+                logger.info(f"获取到原始文件信息: 名称={file_name}, MIME类型={mime_type}")
+            except Exception as file_error:
+                logger.error(f"获取文件信息失败: {file_error}")
+                raise
             
             # 添加年份前缀到文件名
             new_name = f"{year}_{file_name}"
             
-            # 更新文件元数据（移动到归档文件夹并重命名）
-            file = self.drive_service.files().update(
-                fileId=file_id,
-                body={
-                    'name': new_name,
-                    'parents': [archive_folder_id]
-                },
-                fields='id, webViewLink',
-                # 移除当前父文件夹
-                removeParents=','.join(file.get('parents', []))
-            ).execute()
-            
-            file_id = file.get('id')
-            public_link = file.get('webViewLink', '')
-            
-            logger.info(f"文件归档成功: {file_id}, 新名称: {new_name}, 新链接: {public_link}")
-            
-            return {
-                'file_id': file_id,
-                'public_link': public_link
-            }
+            try:
+                # 复制文件到归档文件夹（而不是移动）
+                copied_file = self.drive_service.files().copy(
+                    fileId=file_id,
+                    body={
+                        'name': new_name,
+                        'parents': [archive_folder_id]
+                    },
+                    fields='id, webViewLink'
+                ).execute()
+                
+                new_file_id = copied_file.get('id')
+                public_link = copied_file.get('webViewLink', '')
+                
+                # 设置文件权限为"任何人都可以查看"
+                self.drive_service.permissions().create(
+                    fileId=new_file_id,
+                    body={'type': 'anyone', 'role': 'reader'},
+                    fields='id'
+                ).execute()
+                
+                logger.info(f"文件归档成功: 原始ID={file_id}, 新ID={new_file_id}, 新名称={new_name}, 新链接={public_link}")
+                
+                return {
+                    'file_id': new_file_id,
+                    'public_link': public_link
+                }
+            except Exception as copy_error:
+                logger.error(f"复制文件到归档文件夹失败: {copy_error}")
+                # 如果复制失败，尝试直接上传文件内容
+                try:
+                    logger.info(f"尝试通过下载再上传的方式归档文件: {file_id}")
+                    # 下载文件内容
+                    request = self.drive_service.files().get_media(fileId=file_id)
+                    file_content = io.BytesIO()
+                    downloader = MediaIoBaseDownload(file_content, request)
+                    done = False
+                    while not done:
+                        status, done = downloader.next_chunk()
+                        logger.info(f"下载进度: {int(status.progress() * 100)}%")
+                    
+                    # 重置文件指针
+                    file_content.seek(0)
+                    
+                    # 上传到归档文件夹
+                    file_metadata = {
+                        'name': new_name,
+                        'parents': [archive_folder_id]
+                    }
+                    
+                    media = MediaIoBaseUpload(file_content, mimetype=mime_type, resumable=True)
+                    uploaded_file = self.drive_service.files().create(
+                        body=file_metadata,
+                        media_body=media,
+                        fields='id, webViewLink'
+                    ).execute()
+                    
+                    new_file_id = uploaded_file.get('id')
+                    public_link = uploaded_file.get('webViewLink', '')
+                    
+                    # 设置文件权限为"任何人都可以查看"
+                    self.drive_service.permissions().create(
+                        fileId=new_file_id,
+                        body={'type': 'anyone', 'role': 'reader'},
+                        fields='id'
+                    ).execute()
+                    
+                    logger.info(f"通过重新上传归档文件成功: 原始ID={file_id}, 新ID={new_file_id}, 新名称={new_name}")
+                    
+                    return {
+                        'file_id': new_file_id,
+                        'public_link': public_link
+                    }
+                except Exception as upload_error:
+                    logger.error(f"重新上传文件失败: {upload_error}")
+                    raise
             
         except Exception as e:
             logger.error(f"归档文件失败: {e}")
@@ -521,7 +603,11 @@ class GoogleDriveUploader:
                     logger.error(f"Google API错误详情: {error_details}")
                 except:
                     logger.error(f"原始错误响应: {e.content}")
-            raise
+            # 返回空结果而不是抛出异常，确保程序继续运行
+            return {
+                'file_id': '',
+                'public_link': ''
+            }
 
 
 # 创建全局实例，但不立即初始化
