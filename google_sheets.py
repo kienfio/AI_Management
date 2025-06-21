@@ -259,12 +259,18 @@ class GoogleSheetsManager:
                     continue
                 
                 # 构建标准化的记录
+                amount_value = self._parse_number(record.get('Amount', 0))
+                
+                # 记录原始值和解析后的值，用于调试
+                if month:
+                    logger.info(f"销售记录 {date}: 原始金额={record.get('Amount', 0)}, 解析后金额={amount_value}")
+                
                 formatted_record = {
                     'date': date,
                     'person': record.get('PIC', ''),
                     'invoice_no': record.get('Invoice NO', ''),
                     'bill_to': record.get('Bill To', ''),
-                    'amount': self._parse_number(record.get('Amount', 0)),
+                    'amount': amount_value,
                     'status': record.get('Status', ''),
                     'type': record.get('Type', ''),
                     'agent_name': record.get('Agent Name', ''),
@@ -276,6 +282,11 @@ class GoogleSheetsManager:
                 
                 formatted_records.append(formatted_record)
             
+            # 记录找到的记录数量，用于调试
+            if month:
+                total_amount = sum(r['amount'] for r in formatted_records)
+                logger.info(f"月份 {month} 找到 {len(formatted_records)} 条销售记录，总金额: {total_amount}")
+            
             return formatted_records
             
         except Exception as e:
@@ -286,13 +297,43 @@ class GoogleSheetsManager:
         """将各种格式的数值转换为浮点数"""
         if isinstance(value, (int, float)):
             return float(value)
+        
         if isinstance(value, str):
             # 移除货币符号、千位分隔符等
-            clean_value = value.replace(',', '').replace('¥', '').replace('$', '').replace('€', '').replace('RM', '')
+            clean_value = value.strip()
+            
+            # 记录原始值，用于调试复杂情况
+            original_value = clean_value
+            
+            # 移除各种货币符号
+            for symbol in ['RM', '¥', '$', '€', 'USD', 'MYR', 'CNY', 'EUR']:
+                clean_value = clean_value.replace(symbol, '')
+            
+            # 移除千位分隔符和其他非数字字符(保留小数点和负号)
+            clean_value = clean_value.replace(',', '').strip()
+            
+            # 处理百分比
+            if '%' in clean_value:
+                clean_value = clean_value.replace('%', '')
+                try:
+                    return float(clean_value) / 100
+                except ValueError:
+                    pass
+            
+            # 尝试转换为浮点数
             try:
-                return float(clean_value)
+                result = float(clean_value)
+                
+                # 如果原始值和解析值差异很大，记录日志
+                if original_value and abs(len(original_value) - len(str(int(result)))) > 3:
+                    logger.warning(f"金额解析可能存在问题: 原始值='{original_value}', 解析结果={result}")
+                    
+                return result
             except ValueError:
-                pass
+                # 如果转换失败，记录日志
+                if clean_value.strip():  # 只记录非空值
+                    logger.warning(f"无法解析金额: '{original_value}' -> '{clean_value}'")
+        
         return 0.0
     
     # =============================================================================
@@ -715,12 +756,12 @@ class GoogleSheetsManager:
             sales_records = self.get_sales_records(month)
             expense_records = self.get_expense_records(month)
             
-            # 计算收入
-            revenue = sum(float(r.get('amount', 0)) for r in sales_records)
+            # 计算收入 - 修复：确保正确解析销售记录中的金额
+            revenue = sum(self._parse_number(r.get('amount', 0)) for r in sales_records)
             
             # 计算成本
             cost_of_goods = 0
-            commission_cost = sum(float(r.get('commission', 0)) for r in sales_records)
+            commission_cost = sum(self._parse_number(r.get('commission', 0)) for r in sales_records)
             
             # 按类型统计费用
             expense_by_type = {}
@@ -745,6 +786,9 @@ class GoogleSheetsManager:
             
             # 计算利润率
             profit_margin = (net_profit / revenue * 100) if revenue > 0 else 0
+            
+            # 记录日志以便调试
+            logger.info(f"月度报表 {month}: 销售记录数量={len(sales_records)}, 总收入={revenue}")
             
             return {
                 'period': month,
@@ -793,10 +837,16 @@ class GoogleSheetsManager:
                 'profit_margin': 0
             }
             
+            # 记录月度数据，用于调试
+            monthly_revenues = []
+            
             # 累计每个月的数据
             for month in range(1, 13):
                 month_str = f"{year}-{month:02d}"
                 monthly_data = self.generate_pl_report(month_str)
+                
+                # 记录每月收入，用于调试
+                monthly_revenues.append((month_str, monthly_data['revenue']))
                 
                 # 累加各项数据
                 for key in yearly_data.keys():
@@ -808,6 +858,10 @@ class GoogleSheetsManager:
             
             # 添加期间信息
             yearly_data['period'] = str(year)
+            
+            # 记录日志，用于调试
+            logger.info(f"年度报表 {year}: 总收入={yearly_data['revenue']}")
+            logger.info(f"月度收入明细: {monthly_revenues}")
             
             return yearly_data
             
@@ -992,10 +1046,16 @@ class GoogleSheetsManager:
             # 按月获取损益表数据
             monthly_data = []
             
+            # 记录月度收入，用于调试
+            monthly_revenues = []
+            
             for month in range(1, 13):
                 month_str = f"{year}-{month:02d}"
                 # 获取月度损益表数据
                 pl_data = self.generate_pl_report(month_str)
+                
+                # 记录每月收入，用于调试
+                monthly_revenues.append((month_str, pl_data['revenue']))
                 
                 # 添加到月度数据列表
                 monthly_data.append([
@@ -1020,6 +1080,9 @@ class GoogleSheetsManager:
             
             # 获取年度损益表数据
             yearly_data = self.generate_yearly_pl_report(year)
+            
+            # 记录年度总收入，用于调试
+            logger.info(f"P&L报表 {year}: 年度总收入={yearly_data['revenue']}, 月度收入={monthly_revenues}")
             
             worksheet.append_row([
                 f"Total {year}",
