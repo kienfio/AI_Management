@@ -786,17 +786,18 @@ async def sales_list_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # ====================================
 
 async def cost_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """显示费用管理菜单"""
+    """费用管理主菜单"""
+    await close_other_conversations(update, context)
+    
     query = update.callback_query
     await query.answer()
     
-    # 清除用户数据
-    context.user_data.clear()
-    
     keyboard = [
         [InlineKeyboardButton("🛒 Purchasing", callback_data="cost_purchasing")],
-        [InlineKeyboardButton("💳 Billing", callback_data="cost_billing")],
-        [InlineKeyboardButton("👨‍💼 Worker Salary", callback_data="cost_salary")],
+        [InlineKeyboardButton("💰 Worker Salary", callback_data="cost_salary")],
+        [InlineKeyboardButton("📄 Billing", callback_data="cost_billing")],
+        [InlineKeyboardButton("📝 Other", callback_data="cost_other")],
+        [InlineKeyboardButton("📋 View Cost Records", callback_data="cost_list")],
         [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="back_main")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -821,7 +822,8 @@ async def cost_type_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         "billing_water": "Water Bill",
         "billing_electricity": "Electricity Bill",
         "billing_wifi": "WiFi Bill",
-        "billing_other": "Other Bill"
+        "billing_other": "Other Bill",
+        "cost_other": "Other"  # 添加Other类型
     }
     
     # 对于账单子类型的处理
@@ -974,6 +976,21 @@ async def cost_type_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             )
             return ConversationHandler.END
     
+    elif query.data == "cost_other":
+        # 对于Other类型，直接进入描述输入
+        keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "📝 <b>Other Expense</b>\n\n<b>Please enter description:</b>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+        
+        # 设置标记，表示等待自定义描述
+        context.user_data['waiting_for_other_desc'] = True
+        return COST_DESC
+    
     return ConversationHandler.END
 
 async def cost_supplier_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1095,7 +1112,7 @@ async def cost_desc_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     desc = update.message.text.strip()
     context.user_data['cost_desc'] = desc
     
-    # 检查是否是自定义账单描述
+    # 处理自定义账单描述
     if context.user_data.get('waiting_for_bill_desc'):
         # 清除等待标记
         context.user_data.pop('waiting_for_bill_desc', None)
@@ -1110,6 +1127,25 @@ async def cost_desc_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         
         await update.message.reply_html(
             f"📝 <b>Bill Description:</b> {desc}\n\n<b>Please enter the amount:</b>",
+            reply_markup=reply_markup
+        )
+        
+        return COST_AMOUNT
+    
+    # 处理Other类型的描述
+    if context.user_data.get('waiting_for_other_desc'):
+        # 清除等待标记
+        context.user_data.pop('waiting_for_other_desc', None)
+        
+        # 保存描述，类型保持为Other
+        context.user_data['cost_desc'] = desc
+        
+        # 提示输入金额
+        keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_html(
+            f"📝 <b>Description:</b> {desc}\n\n<b>Please enter the amount:</b>",
             reply_markup=reply_markup
         )
         
@@ -1363,19 +1399,46 @@ async def cost_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="back_main")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await query.edit_message_text(
-            success_message,
-            parse_mode=ParseMode.HTML,
-            reply_markup=reply_markup
-        )
+        try:
+            # 尝试更新消息
+            await query.edit_message_text(
+                success_message,
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
+            )
+        except Exception as edit_error:
+            # 捕获消息未修改的错误
+            if "Message is not modified" in str(edit_error):
+                logger.info("消息内容未变化，跳过更新")
+                # 可以选择发送新消息
+                await query.message.reply_text(
+                    "✅ 费用记录已保存成功！",
+                    reply_markup=reply_markup
+                )
+            else:
+                # 其他错误则重新抛出
+                raise edit_error
         
     except Exception as e:
         logger.error(f"保存费用记录失败: {e}")
-        await query.edit_message_text(
-            "❌ <b>Failed to save expense</b>\n\nPlease try again later.",
-            parse_mode=ParseMode.HTML
-        )
+        try:
+            await query.edit_message_text(
+                "❌ <b>Failed to save expense</b>\n\nPlease try again later.",
+                parse_mode=ParseMode.HTML
+            )
+        except Exception as edit_error:
+            # 处理编辑消息失败的情况
+            if "Message is not modified" not in str(edit_error):
+                logger.error(f"更新错误消息失败: {edit_error}")
+                # 尝试发送新消息
+                await query.message.reply_text(
+                    "❌ <b>Failed to save expense</b>\n\nPlease try again later.",
+                    parse_mode=ParseMode.HTML
+                )
+        
         return ConversationHandler.END
+    
+    return ConversationHandler.END
 
 async def show_cost_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """显示费用确认信息"""
