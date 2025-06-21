@@ -21,6 +21,8 @@ from telegram.ext import (
 )
 
 from google_sheets import GoogleSheetsManager as SheetsManager
+from google_sheets import sheets_manager, SHEET_NAMES
+from google_drive_uploader import get_drive_uploader
 
 # 设置日志
 logger = logging.getLogger(__name__)
@@ -2448,6 +2450,10 @@ def register_handlers(application):
     application.add_handler(CommandHandler("SaleInvoice", sale_invoice_command))
     application.add_handler(CommandHandler("report", report_command))  # 添加 /report 命令处理器
     
+    # 归档功能处理器
+    application.add_handler(CallbackQueryHandler(archive_pnl_records_handler, pattern='^archive_pnl$'))
+    application.add_handler(CallbackQueryHandler(confirm_archive_handler, pattern='^confirm_archive_\d+$'))
+    
     # 回调查询处理器 (放在会话处理器之后)
     application.add_handler(CallbackQueryHandler(sales_callback_handler, pattern='^sales_'))
     application.add_handler(CallbackQueryHandler(expenses_callback_handler, pattern='^(cost_|expenses_)'))
@@ -2477,6 +2483,7 @@ async def setting_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         [InlineKeyboardButton("🏭  Create Supplier", callback_data="setting_create_supplier")],
         [InlineKeyboardButton("👷  Create Worker", callback_data="setting_create_worker")],
         [InlineKeyboardButton("👑  Create Person in Charge", callback_data="setting_create_pic")],
+        [InlineKeyboardButton("🗃  Archive Records", callback_data="archive_pnl")],
         [InlineKeyboardButton("🔙  Back to Main Menu", callback_data="back_main")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -3067,6 +3074,7 @@ async def menu_setting_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         [InlineKeyboardButton("🏭  Create Supplier", callback_data="setting_create_supplier")],
         [InlineKeyboardButton("👷  Create Worker", callback_data="setting_create_worker")],
         [InlineKeyboardButton("👑  Create Person in Charge", callback_data="setting_create_pic")],
+        [InlineKeyboardButton("🗃  Archive Records", callback_data="archive_pnl")],
         [InlineKeyboardButton("🔙  Back to Main Menu", callback_data="back_main")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -3795,3 +3803,483 @@ async def report_yearly_handler(update: Update, context: ContextTypes.DEFAULT_TY
     except Exception as e:
         logger.error(f"生成年度报表失败: {e}")
         await query.edit_message_text("❌ 生成报表失败，请重试")
+
+# ====================================
+# 归档功能区 - 年度归档和数据迁移
+# ====================================
+
+async def archive_pnl_records_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理财务记录归档操作"""
+    query = update.callback_query
+    await query.answer()
+    
+    try:
+        # 获取当前年份
+        current_year = datetime.now().year
+        next_year = current_year + 1
+        
+        # 显示归档确认对话框
+        keyboard = [
+            [InlineKeyboardButton(f"✅ 确认归档 {current_year} 年数据", callback_data=f"confirm_archive_{current_year}")],
+            [InlineKeyboardButton("❌ 取消", callback_data="back_main")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            f"🗃 <b>归档确认</b>\n\n"
+            f"您即将归档 <b>{current_year}</b> 年的所有财务记录。\n\n"
+            f"此操作将：\n"
+            f"• 将 {current_year} 年的销售和支出记录复制到新表格\n"
+            f"• 将相关收据和发票归档到指定文件夹\n"
+            f"• 从原表格中删除 {current_year} 年的记录\n"
+            f"• 为 {next_year} 年创建新的 P&L 表格\n\n"
+            f"<b>此操作无法撤销，请确认继续？</b>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+        
+        return ConversationHandler.END
+        
+    except Exception as e:
+        logger.error(f"显示归档确认对话框失败: {e}")
+        await query.edit_message_text(
+            "❌ <b>操作失败</b>\n\n显示归档确认对话框时出错。请稍后重试。",
+            parse_mode=ParseMode.HTML
+        )
+        return ConversationHandler.END
+
+async def confirm_archive_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理归档确认回调"""
+    query = update.callback_query
+    await query.answer()
+    
+    # 从回调数据中获取年份
+    year_str = query.data.replace("confirm_archive_", "")
+    try:
+        year = int(year_str)
+    except ValueError:
+        await query.edit_message_text("❌ <b>操作失败</b>\n\n无效的年份格式。", parse_mode=ParseMode.HTML)
+        return ConversationHandler.END
+    
+    # 显示处理中消息
+    await query.edit_message_text(
+        f"⏳ <b>正在归档 {year} 年数据...</b>\n\n"
+        f"请稍候，此过程可能需要几分钟时间...",
+        parse_mode=ParseMode.HTML
+    )
+    
+    try:
+        # 执行归档操作
+        result = await perform_archive_operation(year)
+        
+        # 根据结果显示成功或失败消息
+        if result['success']:
+            keyboard = [[InlineKeyboardButton("🔙 返回主菜单", callback_data="back_main")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                f"✅ <b>归档成功</b>\n\n"
+                f"已成功归档 {year} 年的财务记录：\n\n"
+                f"• 销售记录：{result['sales_count']} 条\n"
+                f"• 支出记录：{result['expense_count']} 条\n"
+                f"• 归档表格：{result['archive_sheet_name']}\n"
+                f"• 归档文件：{result['archived_files']} 个\n"
+                f"• 新建 {year+1} 年表格：已完成\n\n"
+                f"您可以在 Google Drive 和 Google Sheets 中查看归档的数据。",
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
+            )
+        else:
+            keyboard = [[InlineKeyboardButton("🔙 返回主菜单", callback_data="back_main")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                f"❌ <b>归档失败</b>\n\n"
+                f"归档过程中发生错误：\n{result['error']}\n\n"
+                f"请稍后重试或联系管理员。",
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
+            )
+        
+        return ConversationHandler.END
+        
+    except Exception as e:
+        logger.error(f"执行归档操作失败: {e}")
+        keyboard = [[InlineKeyboardButton("🔙 返回主菜单", callback_data="back_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            f"❌ <b>归档失败</b>\n\n"
+            f"执行归档操作时发生意外错误：\n{str(e)}\n\n"
+            f"请稍后重试或联系管理员。",
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+        return ConversationHandler.END
+
+async def perform_archive_operation(year: int) -> Dict[str, Any]:
+    """执行归档操作的核心逻辑
+    
+    Args:
+        year: 要归档的年份
+    
+    Returns:
+        Dict: 包含操作结果的字典
+    """
+    try:
+        # 初始化结果字典
+        result = {
+            'success': False,
+            'sales_count': 0,
+            'expense_count': 0,
+            'archive_sheet_name': '',
+            'archived_files': 0,
+            'error': ''
+        }
+        
+        # 1. 获取需要归档的销售和支出记录
+        sales_records = filter_records_by_year(sheets_manager.get_sales_records(), year)
+        expense_records = filter_records_by_year(sheets_manager.get_expense_records(), year)
+        
+        # 记录数量
+        result['sales_count'] = len(sales_records)
+        result['expense_count'] = len(expense_records)
+        
+        # 如果没有记录，提前返回
+        if len(sales_records) == 0 and len(expense_records) == 0:
+            result['error'] = f"未找到 {year} 年的记录，无需归档。"
+            return result
+        
+        # 2. 创建归档表格
+        archive_sheet_name = f"Finance Archive {year}"
+        result['archive_sheet_name'] = archive_sheet_name
+        
+        # 创建归档表格并复制数据
+        await create_archive_sheet(archive_sheet_name, sales_records, expense_records)
+        
+        # 3. 归档文件到指定文件夹
+        archive_folder_id = os.getenv('DRIVE_FOLDER_ARCHIVE_REPORTS')
+        if not archive_folder_id:
+            archive_folder_id = "1UrthNTCehUASNE9_3Oe_9SbFT-6lpkyp"  # 使用默认ID
+            
+        # 获取 Drive 上传器实例
+        drive_uploader = get_drive_uploader()
+        
+        # 归档收据和发票文件
+        archived_files_count = 0
+        
+        # 归档销售记录中的发票 PDF
+        for record in sales_records:
+            invoice_pdf_link = record.get('invoice_pdf', '')
+            if invoice_pdf_link and 'drive.google.com' in invoice_pdf_link:
+                try:
+                    # 从链接中提取文件 ID
+                    file_id = extract_file_id_from_link(invoice_pdf_link)
+                    if file_id:
+                        # 归档文件
+                        drive_uploader.archive_file(file_id, year)
+                        archived_files_count += 1
+                except Exception as e:
+                    logger.warning(f"归档发票 PDF 文件失败: {e}")
+        
+        # 归档支出记录中的收据
+        for record in expense_records:
+            receipt_link = record.get('receipt', '')
+            if receipt_link and 'drive.google.com' in receipt_link:
+                try:
+                    # 从链接中提取文件 ID
+                    file_id = extract_file_id_from_link(receipt_link)
+                    if file_id:
+                        # 归档文件
+                        drive_uploader.archive_file(file_id, year)
+                        archived_files_count += 1
+                except Exception as e:
+                    logger.warning(f"归档收据文件失败: {e}")
+        
+        result['archived_files'] = archived_files_count
+        
+        # 4. 创建下一年度的表格
+        next_year = year + 1
+        await create_next_year_sheet(next_year)
+        
+        # 5. 删除原表格中的记录
+        await delete_records_by_year(year)
+        
+        # 标记成功
+        result['success'] = True
+        return result
+        
+    except Exception as e:
+        logger.error(f"执行归档操作失败: {e}")
+        return {
+            'success': False,
+            'sales_count': 0,
+            'expense_count': 0,
+            'archive_sheet_name': '',
+            'archived_files': 0,
+            'error': str(e)
+        }
+
+def extract_file_id_from_link(link: str) -> str:
+    """从 Google Drive 链接中提取文件 ID
+    
+    Args:
+        link: Google Drive 文件链接
+        
+    Returns:
+        str: 文件 ID，如果无法提取则返回空字符串
+    """
+    try:
+        # 处理不同格式的 Google Drive 链接
+        if '/file/d/' in link:
+            # 格式: https://drive.google.com/file/d/FILE_ID/view
+            file_id = link.split('/file/d/')[1].split('/')[0]
+        elif 'id=' in link:
+            # 格式: https://drive.google.com/open?id=FILE_ID
+            file_id = link.split('id=')[1].split('&')[0]
+        elif '/d/' in link and '/edit' in link:
+            # 格式: https://docs.google.com/document/d/FILE_ID/edit
+            file_id = link.split('/d/')[1].split('/edit')[0]
+        elif '/d/' in link and '/view' in link:
+            # 格式: https://drive.google.com/d/FILE_ID/view
+            file_id = link.split('/d/')[1].split('/view')[0]
+        else:
+            # 无法识别的格式
+            logger.warning(f"无法从链接中提取文件 ID: {link}")
+            return ""
+        
+        return file_id
+    except Exception as e:
+        logger.warning(f"提取文件 ID 失败: {e}, 链接: {link}")
+        return ""
+
+def filter_records_by_year(records: List[Dict], year: int) -> List[Dict]:
+    """按年份过滤记录
+    
+    Args:
+        records: 记录列表
+        year: 要过滤的年份
+    
+    Returns:
+        List[Dict]: 过滤后的记录列表
+    """
+    year_str = str(year)
+    filtered_records = []
+    
+    for record in records:
+        # 获取日期字段
+        date_str = record.get('date', '')
+        
+        # 检查日期是否以指定年份开头
+        if date_str.startswith(year_str):
+            filtered_records.append(record)
+    
+    logger.info(f"按年份 {year} 过滤记录: 找到 {len(filtered_records)} 条记录")
+    return filtered_records
+
+async def create_archive_sheet(sheet_name: str, sales_records: List[Dict], expense_records: List[Dict]):
+    """创建归档表格并复制数据
+    
+    Args:
+        sheet_name: 归档表格名称
+        sales_records: 销售记录列表
+        expense_records: 支出记录列表
+    """
+    try:
+        # 获取 spreadsheet 对象
+        spreadsheet = sheets_manager.spreadsheet
+        
+        # 检查表格是否已存在
+        existing_sheets = [ws.title for ws in spreadsheet.worksheets()]
+        
+        if sheet_name in existing_sheets:
+            logger.info(f"归档表格 {sheet_name} 已存在，将清空内容")
+            worksheet = spreadsheet.worksheet(sheet_name)
+            worksheet.clear()
+        else:
+            logger.info(f"创建新的归档表格 {sheet_name}")
+            worksheet = spreadsheet.add_worksheet(title=sheet_name, rows=2000, cols=20)
+        
+        # 创建销售记录子表
+        sales_sheet_name = f"{sheet_name} - Sales"
+        try:
+            sales_worksheet = spreadsheet.worksheet(sales_sheet_name)
+            sales_worksheet.clear()
+        except:
+            sales_worksheet = spreadsheet.add_worksheet(title=sales_sheet_name, rows=1000, cols=15)
+        
+        # 添加销售记录表头
+        sales_headers = ['Date', 'PIC', 'Invoice NO', 'Bill To', 'Amount', 'Status', 'Type', 'Agent Name', 'IC', 'Comm Rate', 'Comm Amount', 'Invoice PDF']
+        sales_worksheet.append_row(sales_headers)
+        
+        # 添加销售记录数据
+        for record in sales_records:
+            row_data = [
+                record.get('date', ''),
+                record.get('person', ''),
+                record.get('invoice_no', ''),
+                record.get('bill_to', ''),
+                record.get('amount', 0),
+                record.get('status', ''),
+                record.get('type', ''),
+                record.get('agent_name', ''),
+                record.get('agent_ic', ''),
+                f"{record.get('commission_rate', 0) * 100}%" if record.get('commission_rate') else '',
+                record.get('commission', 0),
+                record.get('invoice_pdf', '')
+            ]
+            sales_worksheet.append_row(row_data)
+        
+        # 创建支出记录子表
+        expense_sheet_name = f"{sheet_name} - Expenses"
+        try:
+            expense_worksheet = spreadsheet.worksheet(expense_sheet_name)
+            expense_worksheet.clear()
+        except:
+            expense_worksheet = spreadsheet.add_worksheet(title=expense_sheet_name, rows=1000, cols=10)
+        
+        # 添加支出记录表头
+        expense_headers = ['Date', 'Expense Type', 'Supplier', 'Amount', 'Category', 'Notes', 'Receipt']
+        expense_worksheet.append_row(expense_headers)
+        
+        # 添加支出记录数据
+        for record in expense_records:
+            row_data = [
+                record.get('date', ''),
+                record.get('expense_type', ''),
+                record.get('supplier', ''),
+                record.get('amount', 0),
+                record.get('category', ''),
+                record.get('notes', ''),
+                record.get('receipt', '')
+            ]
+            expense_worksheet.append_row(row_data)
+        
+        # 在主归档表格中添加摘要信息
+        worksheet.append_row([f"Finance Archive {sheet_name.split(' ')[-1]}", "", "", "", ""])
+        worksheet.append_row(["", "", "", "", ""])
+        worksheet.append_row(["销售记录总数", len(sales_records), "", "支出记录总数", len(expense_records)])
+        worksheet.append_row(["销售总额", sum(r.get('amount', 0) for r in sales_records), "", "支出总额", sum(r.get('amount', 0) for r in expense_records)])
+        worksheet.append_row(["佣金总额", sum(r.get('commission', 0) for r in sales_records), "", "", ""])
+        worksheet.append_row(["净销售额", sum(r.get('amount', 0) for r in sales_records) - sum(r.get('commission', 0) for r in sales_records), "", "", ""])
+        worksheet.append_row(["", "", "", "", ""])
+        worksheet.append_row(["归档日期", datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "", "", ""])
+        
+        logger.info(f"归档表格创建成功: {sheet_name}")
+        
+    except Exception as e:
+        logger.error(f"创建归档表格失败: {e}")
+        raise
+
+async def create_next_year_sheet(next_year: int):
+    """创建下一年度的表格
+    
+    Args:
+        next_year: 下一年度
+    """
+    try:
+        # 获取 spreadsheet 对象
+        spreadsheet = sheets_manager.spreadsheet
+        
+        # 创建下一年度的 P&L 表格
+        pl_sheet_name = f"P&L Records {next_year}"
+        
+        # 检查表格是否已存在
+        existing_sheets = [ws.title for ws in spreadsheet.worksheets()]
+        
+        if pl_sheet_name in existing_sheets:
+            logger.info(f"下一年度表格 {pl_sheet_name} 已存在，无需创建")
+            return
+        
+        # 创建新表格
+        logger.info(f"创建下一年度表格 {pl_sheet_name}")
+        worksheet = spreadsheet.add_worksheet(title=pl_sheet_name, rows=1000, cols=15)
+        
+        # 获取当前年度表格的表头
+        current_year = next_year - 1
+        current_pl_sheet_name = f"P&L Records {current_year}"
+        
+        try:
+            # 尝试从当前年度表格复制表头
+            current_worksheet = spreadsheet.worksheet(current_pl_sheet_name)
+            headers = current_worksheet.row_values(1)
+            
+            if headers and len(headers) > 0:
+                worksheet.append_row(headers)
+                logger.info(f"从 {current_pl_sheet_name} 复制表头到 {pl_sheet_name}")
+            else:
+                # 如果当前年度表格没有表头，使用默认表头
+                default_headers = ['Date', 'Description', 'Income', 'Expense', 'Balance', 'Category', 'Notes']
+                worksheet.append_row(default_headers)
+                logger.info(f"使用默认表头创建 {pl_sheet_name}")
+                
+        except Exception as e:
+            logger.warning(f"无法从当前年度表格复制表头: {e}")
+            # 使用默认表头
+            default_headers = ['Date', 'Description', 'Income', 'Expense', 'Balance', 'Category', 'Notes']
+            worksheet.append_row(default_headers)
+            logger.info(f"使用默认表头创建 {pl_sheet_name}")
+        
+        logger.info(f"下一年度表格创建成功: {pl_sheet_name}")
+        
+    except Exception as e:
+        logger.error(f"创建下一年度表格失败: {e}")
+        raise
+
+async def delete_records_by_year(year: int):
+    """删除指定年份的记录
+    
+    Args:
+        year: 要删除的记录的年份
+    """
+    try:
+        # 获取销售和支出工作表
+        sales_worksheet = sheets_manager.get_worksheet(SHEET_NAMES['sales'])
+        expense_worksheet = sheets_manager.get_worksheet(SHEET_NAMES['expenses'])
+        
+        if not sales_worksheet or not expense_worksheet:
+            raise ValueError("无法获取销售或支出工作表")
+        
+        # 获取所有数据（包括表头）
+        sales_data = sales_worksheet.get_all_values()
+        expense_data = expense_worksheet.get_all_values()
+        
+        # 提取表头
+        sales_headers = sales_data[0] if sales_data else []
+        expense_headers = expense_data[0] if expense_data else []
+        
+        # 过滤掉指定年份的记录
+        year_str = str(year)
+        new_sales_data = [sales_headers]  # 保留表头
+        new_expense_data = [expense_headers]  # 保留表头
+        
+        # 过滤销售记录
+        for row in sales_data[1:]:  # 跳过表头
+            if row and len(row) > 0 and not row[0].startswith(year_str):
+                new_sales_data.append(row)
+        
+        # 过滤支出记录
+        for row in expense_data[1:]:  # 跳过表头
+            if row and len(row) > 0 and not row[0].startswith(year_str):
+                new_expense_data.append(row)
+        
+        # 记录删除的记录数量
+        deleted_sales = len(sales_data) - len(new_sales_data)
+        deleted_expenses = len(expense_data) - len(new_expense_data)
+        
+        # 清空工作表并重新添加过滤后的数据
+        sales_worksheet.clear()
+        expense_worksheet.clear()
+        
+        # 批量更新工作表
+        if new_sales_data:
+            sales_worksheet.update(new_sales_data)
+        
+        if new_expense_data:
+            expense_worksheet.update(new_expense_data)
+        
+        logger.info(f"已删除 {year} 年的记录: 销售记录 {deleted_sales} 条, 支出记录 {deleted_expenses} 条")
+        
+    except Exception as e:
+        logger.error(f"删除记录失败: {e}")
+        raise
