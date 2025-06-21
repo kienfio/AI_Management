@@ -4008,11 +4008,16 @@ async def perform_archive_operation(year: int) -> Dict[str, Any]:
                     if file_id:
                         logger.info(f"正在归档发票 PDF 文件 ({i+1}/{len(sales_records)}): {file_id}")
                         # 归档文件
-                        drive_uploader.archive_file(file_id, year)
-                        archived_files_count += 1
-                        logger.info(f"发票 PDF 文件归档成功: {file_id}")
+                        result = drive_uploader.archive_file(file_id, year)
+                        if result and result.get('file_id'):
+                            archived_files_count += 1
+                            logger.info(f"发票 PDF 文件归档成功: 原始ID={file_id}, 新ID={result.get('file_id')}")
+                        else:
+                            logger.warning(f"发票 PDF 文件归档未返回有效结果: {file_id}")
+                    else:
+                        logger.warning(f"无法从链接提取文件ID: {invoice_pdf_link}")
                 except Exception as e:
-                    logger.warning(f"归档发票 PDF 文件失败: {e}")
+                    logger.warning(f"归档发票 PDF 文件失败: {e}, 链接: {invoice_pdf_link}")
         
         # 归档支出记录中的收据
         logger.info("正在归档支出记录中的收据...")
@@ -4025,11 +4030,16 @@ async def perform_archive_operation(year: int) -> Dict[str, Any]:
                     if file_id:
                         logger.info(f"正在归档收据文件 ({i+1}/{len(expense_records)}): {file_id}")
                         # 归档文件
-                        drive_uploader.archive_file(file_id, year)
-                        archived_files_count += 1
-                        logger.info(f"收据文件归档成功: {file_id}")
+                        result = drive_uploader.archive_file(file_id, year)
+                        if result and result.get('file_id'):
+                            archived_files_count += 1
+                            logger.info(f"收据文件归档成功: 原始ID={file_id}, 新ID={result.get('file_id')}")
+                        else:
+                            logger.warning(f"收据文件归档未返回有效结果: {file_id}")
+                    else:
+                        logger.warning(f"无法从链接提取文件ID: {receipt_link}")
                 except Exception as e:
-                    logger.warning(f"归档收据文件失败: {e}")
+                    logger.warning(f"归档收据文件失败: {e}, 链接: {receipt_link}")
         
         result['archived_files'] = archived_files_count
         logger.info(f"已成功归档 {archived_files_count} 个文件")
@@ -4081,6 +4091,9 @@ def extract_file_id_from_link(link: str) -> str:
             
         logger.info(f"尝试从链接提取文件 ID: {link}")
         
+        # 清理链接，移除多余的空格和引号
+        link = link.strip().strip('"\'')
+        
         # 处理不同格式的 Google Drive 链接
         if '/file/d/' in link:
             # 格式: https://drive.google.com/file/d/FILE_ID/view
@@ -4103,10 +4116,41 @@ def extract_file_id_from_link(link: str) -> str:
             parts = link.split('/d/')[1].split('/')
             file_id = parts[0]
             logger.info(f"从 /d/ 格式链接提取到文件 ID: {file_id}")
+        elif 'drive.google.com' in link and '=' in link:
+            # 格式: https://drive.google.com/uc?export=view&id=FILE_ID
+            # 或者: https://drive.google.com/thumbnail?id=FILE_ID
+            parts = link.split('=')
+            for i, part in enumerate(parts):
+                if part.endswith('id'):
+                    if i+1 < len(parts):
+                        file_id = parts[i+1].split('&')[0]
+                        logger.info(f"从查询参数格式链接提取到文件 ID: {file_id}")
+                        break
+            else:
+                # 如果上面的循环没有找到 id 参数
+                file_id = ""
+        elif 'docs.google.com' in link:
+            # 格式: https://docs.google.com/spreadsheets/d/FILE_ID/edit
+            # 或者: https://docs.google.com/document/d/FILE_ID/edit
+            for doc_type in ['spreadsheets', 'document', 'presentation', 'forms']:
+                if f'/{doc_type}/d/' in link:
+                    file_id = link.split(f'/{doc_type}/d/')[1].split('/')[0]
+                    logger.info(f"从 Google {doc_type} 链接提取到文件 ID: {file_id}")
+                    break
+            else:
+                file_id = ""
         else:
-            # 无法识别的格式
-            logger.warning(f"无法从链接中提取文件 ID，未知格式: {link}")
-            return ""
+            # 尝试直接使用链接作为文件 ID（如果链接本身就是一个 ID）
+            if len(link) >= 25 and not link.startswith('http') and not '/' in link:
+                file_id = link
+                logger.info(f"链接本身可能是文件 ID: {file_id}")
+            else:
+                # 无法识别的格式
+                logger.warning(f"无法从链接中提取文件 ID，未知格式: {link}")
+                return ""
+        
+        # 清理文件 ID，移除可能的额外字符
+        file_id = file_id.strip().strip('"\'')
         
         # 验证文件 ID 格式
         if file_id and len(file_id) >= 25:  # Google Drive 文件 ID 通常很长
