@@ -19,13 +19,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# 尝试加载环境变量文件
+# 尝试加载.env文件
 try:
     from dotenv import load_dotenv
-    load_dotenv('env.example')  # 明确加载env.example文件
-    logger.info("已加载env.example文件")
+    load_dotenv()
+    logger.info("已加载.env文件")
 except ImportError:
-    logger.warning("dotenv模块未安装，跳过加载环境变量文件")
+    logger.warning("dotenv模块未安装，跳过加载.env文件")
 
 # 输出所有相关环境变量
 logger.info(f"DRIVE_FOLDER_INVOICE_PDF: {os.getenv('DRIVE_FOLDER_INVOICE_PDF')}")
@@ -131,18 +131,6 @@ def main():
     
     # 确保错误处理器已注册
     application.add_error_handler(error_handler)
-    
-    # 尝试启动年度自动化任务调度器
-    try:
-        from scheduled_tasks import start_scheduler
-        if start_scheduler():
-            logger.info("✅ 年度自动化任务调度器已启动")
-        else:
-            logger.warning("⚠️ 年度自动化任务调度器启动失败")
-    except ImportError:
-        logger.warning("⚠️ 未找到scheduled_tasks模块，年度自动化功能将不可用")
-    except Exception as e:
-        logger.error(f"❌ 启动年度自动化任务调度器失败: {e}")
     
     # 获取环境变量
     port = int(os.environ.get("PORT", 8080))
