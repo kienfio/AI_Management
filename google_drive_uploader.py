@@ -50,7 +50,7 @@ class GoogleDriveUploader:
             "Purchasing": os.getenv('DRIVE_FOLDER_PURCHASING'),    # 购买杂货收据文件夹
             "wifi": os.getenv('DRIVE_FOLDER_WIFI'),                # WiFi收据文件夹
             "invoice_pdf": os.getenv('DRIVE_FOLDER_INVOICE_PDF'),   # 发票PDF文件夹
-            "other": "1FfbkRk2v2eBR9FWAKShefxIVBlQjaWrA"          # Other类型的文件夹ID
+            "supplier_other": "1FfbkRk2v2eBR9FWAKShefxIVBlQjaWrA"  # Purchasing > Other的自定义供应商文件夹
         }
         logger.info(f"已初始化文件夹ID映射: {self.FOLDER_IDS}")
     
@@ -135,10 +135,10 @@ class GoogleDriveUploader:
             logger.info(f"发票PDF专用文件夹ID: {folder_id}")
             return folder_id
         
-        # 1.5 处理Other类型
-        if expense_type.lower() == "other":
-            folder_id = self.FOLDER_IDS.get("other")
-            logger.info(f"Other类型文件夹ID: {folder_id}")
+        # 1.5 处理自定义供应商(supplier_other)类型
+        if expense_type.lower() == "supplier_other":
+            folder_id = self.FOLDER_IDS.get("supplier_other")
+            logger.info(f"自定义供应商文件夹ID: {folder_id}")
             return folder_id
         
         # 2. 处理其他费用类型
