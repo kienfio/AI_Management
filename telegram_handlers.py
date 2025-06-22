@@ -35,6 +35,9 @@ SALES_PERSON, SALES_AMOUNT, SALES_BILL_TO, SALES_CLIENT, SALES_COMMISSION_TYPE, 
 # 费用管理状态
 COST_TYPE, COST_SUPPLIER, COST_AMOUNT, COST_DESC, COST_RECEIPT, COST_CONFIRM, COST_WORKER = range(7)  # 添加 COST_WORKER 状态
 
+# 工人薪资计算相关状态
+WORKER_BASIC_SALARY, WORKER_ALLOWANCE, WORKER_OT, WORKER_DEDUCTIONS, WORKER_EPF_RATE, WORKER_CONFIRM = range(10, 16)
+
 # 报表生成状态
 REPORT_TYPE, REPORT_MONTH = range(2)
 
@@ -818,7 +821,8 @@ async def cost_type_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         "billing_water": "Water Bill",
         "billing_electricity": "Electricity Bill",
         "billing_wifi": "WiFi Bill",
-        "billing_other": "Other Bill"
+        "billing_other": "Other Bill",
+        "cost_other": "Other"  # 添加Other类型
     }
     
     # 对于账单子类型的处理
@@ -971,6 +975,21 @@ async def cost_type_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             )
             return ConversationHandler.END
     
+    elif query.data == "cost_other":
+        # 对于Other类型，直接进入描述输入
+        keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "📝 <b>Other Expense</b>\n\n<b>Please enter description:</b>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+        
+        # 设置标记，表示等待自定义描述
+        context.user_data['waiting_for_other_desc'] = True
+        return COST_DESC
+    
     return ConversationHandler.END
 
 async def cost_supplier_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1020,6 +1039,9 @@ async def custom_supplier_handler(update: Update, context: ContextTypes.DEFAULT_
     # 获取用户输入的供应商名称
     supplier_name = update.message.text.strip()
     context.user_data['cost_supplier'] = supplier_name
+    
+    # 标记这是自定义供应商，以便上传照片时使用特定文件夹
+    context.user_data['is_custom_supplier'] = True
     
     # 清除等待标记
     context.user_data.pop('waiting_for_custom_supplier', None)
@@ -1092,7 +1114,7 @@ async def cost_desc_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     desc = update.message.text.strip()
     context.user_data['cost_desc'] = desc
     
-    # 检查是否是自定义账单描述
+    # 处理自定义账单描述
     if context.user_data.get('waiting_for_bill_desc'):
         # 清除等待标记
         context.user_data.pop('waiting_for_bill_desc', None)
@@ -1107,6 +1129,25 @@ async def cost_desc_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         
         await update.message.reply_html(
             f"📝 <b>Bill Description:</b> {desc}\n\n<b>Please enter the amount:</b>",
+            reply_markup=reply_markup
+        )
+        
+        return COST_AMOUNT
+    
+    # 处理Other类型的描述
+    if context.user_data.get('waiting_for_other_desc'):
+        # 清除等待标记
+        context.user_data.pop('waiting_for_other_desc', None)
+        
+        # 保存描述，类型保持为Other
+        context.user_data['cost_desc'] = desc
+        
+        # 提示输入金额
+        keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_html(
+            f"📝 <b>Description:</b> {desc}\n\n<b>Please enter the amount:</b>",
             reply_markup=reply_markup
         )
         
@@ -1167,6 +1208,11 @@ async def cost_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         # 转换为小写进行匹配
         cost_type_lower = cost_type.lower()
         drive_folder_type = type_mapping.get(cost_type_lower, cost_type)
+        
+        # 检查是否是自定义供应商，如果是则使用supplier_other文件夹
+        if context.user_data.get('is_custom_supplier') and cost_type == "Purchasing":
+            drive_folder_type = "supplier_other"
+            logger.info("检测到自定义供应商，使用supplier_other文件夹")
         
         # 添加日志，记录映射后的类型
         logger.info(f"映射后的文件夹类型: {drive_folder_type}")
@@ -1270,6 +1316,41 @@ async def cost_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             'description': desc,
             'receipt': receipt_link  # 使用Google Drive链接
         }
+        
+        # 如果是工资，并且启用了EPF或SOCSO，添加相关数据
+        if cost_type == "Worker Salary":
+            # 添加基本工资、津贴和加班费
+            if 'basic_salary' in context.user_data:
+                data['basic_salary'] = context.user_data['basic_salary']
+            if 'allowance' in context.user_data:
+                data['allowance'] = context.user_data['allowance']
+            if 'overtime' in context.user_data:
+                data['overtime'] = context.user_data['overtime']
+            
+            # 添加EPF相关数据
+            if context.user_data.get('epf_enabled', False):
+                data['epf_employee'] = context.user_data['epf_employee']
+                data['epf_employer'] = context.user_data['epf_employer']
+                data['epf_rate'] = context.user_data.get('employer_epf_rate', 13)
+            
+            # 添加SOCSO相关数据
+            if context.user_data.get('socso_enabled', False):
+                data['socso_employee'] = context.user_data['socso_employee']
+                data['socso_employer'] = context.user_data['socso_employer']
+            
+            # 添加净工资
+            if 'net_salary' in context.user_data:
+                data['net_salary'] = context.user_data['net_salary']
+            
+            # 添加雇主总成本
+            if 'total_employer_cost' in context.user_data:
+                data['total_cost'] = context.user_data['total_employer_cost']
+                
+            # 更新描述信息，包含EPF和SOCSO状态
+            epf_text = "EPF启用" if context.user_data.get('epf_enabled', False) else "EPF未启用"
+            socso_text = "SOCSO启用" if context.user_data.get('socso_enabled', False) else "SOCSO未启用"
+            data['description'] = f"{desc} ({epf_text}, {socso_text})"
+        
         sheets_manager.add_expense_record(data)
         
         # 构建成功消息
@@ -1280,10 +1361,43 @@ async def cost_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 """
         if cost_type == "Worker Salary" and worker:
             success_message += f"👷 <b>Worker:</b> {worker}\n"
+            
+            # 如果启用了EPF或SOCSO，显示详细信息
+            if context.user_data.get('epf_enabled', False) or context.user_data.get('socso_enabled', False):
+                basic_salary = context.user_data.get('basic_salary', 0)
+                allowance = context.user_data.get('allowance', 0)
+                overtime = context.user_data.get('overtime', 0)
+                
+                success_message += f"💰 <b>Basic Salary:</b> RM{basic_salary:,.2f}\n"
+                if allowance > 0:
+                    success_message += f"💵 <b>Allowance:</b> RM{allowance:,.2f}\n"
+                if overtime > 0:
+                    success_message += f"⏱️ <b>Overtime:</b> RM{overtime:,.2f}\n"
+                
+                if context.user_data.get('epf_enabled', False):
+                    epf_employee = context.user_data.get('epf_employee', 0)
+                    epf_employer = context.user_data.get('epf_employer', 0)
+                    employer_epf_rate = context.user_data.get('employer_epf_rate', 13)
+                    
+                    success_message += f"💼 <b>EPF (Employee 11%):</b> RM{epf_employee:,.2f}\n"
+                    success_message += f"🏢 <b>EPF (Employer {employer_epf_rate}%):</b> RM{epf_employer:,.2f}\n"
+                
+                if context.user_data.get('socso_enabled', False):
+                    socso_employee = context.user_data.get('socso_employee', 0)
+                    socso_employer = context.user_data.get('socso_employer', 0)
+                    
+                    success_message += f"🩺 <b>SOCSO (Employee 0.5%):</b> RM{socso_employee:,.2f}\n"
+                    success_message += f"🏢 <b>SOCSO (Employer 1.75%):</b> RM{socso_employer:,.2f}\n"
+                
+                net_salary = context.user_data.get('net_salary', 0)
+                success_message += f"🧾 <b>Net Salary:</b> RM{net_salary:,.2f}\n"
+            else:
+                success_message += f"💰 <b>Amount:</b> RM{amount:,.2f}\n"
         elif supplier:
             success_message += f"🏭 <b>Supplier:</b> {supplier}\n"
-            
-        success_message += f"💰 <b>Amount:</b> RM{amount:,.2f}\n"
+            success_message += f"💰 <b>Amount:</b> RM{amount:,.2f}\n"
+        else:
+            success_message += f"💰 <b>Amount:</b> RM{amount:,.2f}\n"
         
         if receipt_link:
             success_message += "📎 <b>Receipt:</b> Uploaded successfully\n"
@@ -1292,25 +1406,46 @@ async def cost_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="back_main")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await query.edit_message_text(
-            success_message,
-            parse_mode=ParseMode.HTML,
-            reply_markup=reply_markup
-        )
-        
-        # 清除用户数据
-        context.user_data.clear()
-        
-        # 结束对话
-        return ConversationHandler.END
+        try:
+            # 尝试更新消息
+            await query.edit_message_text(
+                success_message,
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
+            )
+        except Exception as edit_error:
+            # 捕获消息未修改的错误
+            if "Message is not modified" in str(edit_error):
+                logger.info("消息内容未变化，跳过更新")
+                # 可以选择发送新消息
+                await query.message.reply_text(
+                    "✅ 费用记录已保存成功！",
+                    reply_markup=reply_markup
+                )
+            else:
+                # 其他错误则重新抛出
+                raise edit_error
         
     except Exception as e:
         logger.error(f"保存费用记录失败: {e}")
-        await query.edit_message_text(
-            "❌ <b>Failed to save expense</b>\n\nPlease try again later.",
-            parse_mode=ParseMode.HTML
-        )
+        try:
+            await query.edit_message_text(
+                "❌ <b>Failed to save expense</b>\n\nPlease try again later.",
+                parse_mode=ParseMode.HTML
+            )
+        except Exception as edit_error:
+            # 处理编辑消息失败的情况
+            if "Message is not modified" not in str(edit_error):
+                logger.error(f"更新错误消息失败: {edit_error}")
+                # 尝试发送新消息
+                await query.message.reply_text(
+                    "❌ <b>Failed to save expense</b>\n\nPlease try again later.",
+                    parse_mode=ParseMode.HTML
+                )
+        
         return ConversationHandler.END
+    
+    return ConversationHandler.END
 
 async def show_cost_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """显示费用确认信息"""
@@ -1441,25 +1576,45 @@ async def show_cost_confirmation(update: Update, context: ContextTypes.DEFAULT_T
 # 报表生成区 - 月度报表、自定义查询
 # ====================================
 
+async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理 /report 命令 - 显示报表中心菜单"""
+    # 清除用户数据
+    context.user_data.clear()
+    
+    # 显示报表中心菜单
+    return await report_menu(update, context)
+
 async def report_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """报表生成主菜单"""
+    """报表生成主菜单 - 统一的报表中心"""
     await close_other_conversations(update, context)
     
     keyboard = [
-        [InlineKeyboardButton("📊 当月报表", callback_data="report_current")],
-        [InlineKeyboardButton("🗓️ 指定月份", callback_data="report_custom")],
-        [InlineKeyboardButton("📈 年度汇总", callback_data="report_yearly")],
+        [InlineKeyboardButton("📑 报表导出", callback_data="report_export")],
         [InlineKeyboardButton("🔙 返回主菜单", callback_data="back_main")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    message = "📈 *报表生成*\n\n请选择报表类型："
+    message = "📈 *报表中心*\n\n请选择功能："
     
-    await update.callback_query.edit_message_text(
-        message, 
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=reply_markup
-    )
+    # 检查是通过回调查询还是直接命令调用
+    if update.callback_query:
+        await update.callback_query.edit_message_text(
+            message, 
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=reply_markup
+        )
+    elif update.message:
+        await update.message.reply_text(
+            message, 
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=reply_markup
+        )
+    else:
+        # 如果既不是回调查询也不是消息，记录错误
+        logger.error("Unable to display report menu: update object has neither callback_query nor message attribute")
+        return ConversationHandler.END
+    
+    return ConversationHandler.END
 
 async def report_current_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """生成当月报表"""
@@ -1478,19 +1633,19 @@ async def report_current_handler(update: Update, context: ContextTypes.DEFAULT_T
 📊 *{current_month} 月度报表*
 
 💰 *收入统计*
-• 总销售额：¥{report_data['total_sales']:,.2f}
-• 总佣金：¥{report_data['total_commission']:,.2f}
+• 总销售额：RM{report_data['total_sales']:,.2f}
+• 总佣金：RM{report_data['total_commission']:,.2f}
 
 💸 *支出统计*
-• 采购支出：¥{report_data['purchase_cost']:,.2f}
-• 水电网络：¥{report_data['utility_cost']:,.2f}
-• 人工工资：¥{report_data['salary_cost']:,.2f}
-• 其他支出：¥{report_data['other_cost']:,.2f}
-• 总支出：¥{report_data['total_cost']:,.2f}
+• 采购支出：RM{report_data['purchase_cost']:,.2f}
+• 水电网络：RM{report_data['utility_cost']:,.2f}
+• 人工工资：RM{report_data['salary_cost']:,.2f}
+• 其他支出：RM{report_data['other_cost']:,.2f}
+• 总支出：RM{report_data['total_cost']:,.2f}
 
 📈 *盈亏分析*
-• 毛利润：¥{report_data['gross_profit']:,.2f}
-• 净利润：¥{report_data['net_profit']:,.2f}
+• 毛利润：RM{report_data['gross_profit']:,.2f}
+• 净利润：RM{report_data['net_profit']:,.2f}
         """
         
         await query.edit_message_text(
@@ -1505,110 +1660,353 @@ async def report_current_handler(update: Update, context: ContextTypes.DEFAULT_T
     
     return ConversationHandler.END
 
-async def report_custom_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """自定义月份报表"""
+async def report_pl_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """显示损益表(P&L)菜单"""
     query = update.callback_query
     await query.answer()
     
-    keyboard = [[InlineKeyboardButton("❌ 取消", callback_data="back_report")]]
+    keyboard = [
+        [InlineKeyboardButton("📅 当月损益表", callback_data="pl_current")],
+        [InlineKeyboardButton("🗓️ 指定月份损益表", callback_data="pl_custom")],
+        [InlineKeyboardButton("📆 年度损益表", callback_data="pl_yearly")],
+        [InlineKeyboardButton("💾 同步到Google表格", callback_data="pl_sync_sheet")],
+        [InlineKeyboardButton("🔙 返回报表菜单", callback_data="menu_report")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    message = "💹 *损益表 (P&L)*\n\n请选择损益表类型："
+    
+    await query.edit_message_text(
+        message,
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=reply_markup
+    )
+    
+    return ConversationHandler.END
+
+async def report_pl_current(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """生成当月损益表"""
+    query = update.callback_query
+    await query.answer()
+    
+    try:
+        sheets_manager = SheetsManager()
+        current_month = datetime.now().strftime('%Y-%m')
+        
+        # 发送处理中的消息
+        await query.edit_message_text(
+            "⏳ 正在生成当月损益表，请稍候...",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        
+        # 获取损益表数据
+        pl_data = await sheets_manager.generate_pl_report(current_month)
+        
+        # 显示损益表
+        return await display_pl_report(update, context, pl_data, current_month)
+        
+    except Exception as e:
+        logger.error(f"生成损益表失败: {e}")
+        
+        keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="report_pl")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "❌ 生成损益表失败，请重试",
+            reply_markup=reply_markup
+        )
+    
+    return ConversationHandler.END
+
+async def report_pl_custom(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """选择指定月份生成损益表"""
+    query = update.callback_query
+    await query.answer()
+    
+    keyboard = [[InlineKeyboardButton("❌ 取消", callback_data="report_pl")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
         "🗓️ 请输入月份（格式：YYYY-MM，如：2024-03）：",
         reply_markup=reply_markup
     )
+    
+    # 设置状态标记，表示等待损益表月份输入
+    context.user_data['waiting_for_pl_month'] = True
+    
     return REPORT_MONTH
 
-async def report_month_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理自定义月份输入"""
+async def report_pl_month_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理损益表月份输入"""
     try:
         month_input = update.message.text.strip()
         # 验证日期格式
         datetime.strptime(month_input, '%Y-%m')
         
-        sheets_manager = SheetsManager()
-        report_data = await sheets_manager.generate_monthly_report(month_input)
-        
-        keyboard = [[InlineKeyboardButton("🔙 返回报表菜单", callback_data="menu_report")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        report_message = f"""
-📊 *{month_input} 月度报表*
-
-💰 *收入统计*
-• 总销售额：¥{report_data['total_sales']:,.2f}
-• 总佣金：¥{report_data['total_commission']:,.2f}
-
-💸 *支出统计*
-• 采购支出：¥{report_data['purchase_cost']:,.2f}
-• 水电网络：¥{report_data['utility_cost']:,.2f}
-• 人工工资：¥{report_data['salary_cost']:,.2f}
-• 其他支出：¥{report_data['other_cost']:,.2f}
-• 总支出：¥{report_data['total_cost']:,.2f}
-
-📈 *盈亏分析*
-• 毛利润：¥{report_data['gross_profit']:,.2f}
-• 净利润：¥{report_data['net_profit']:,.2f}
-        """
-        
-        await update.message.reply_text(
-            report_message,
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=reply_markup
+        # 发送处理中的消息
+        processing_message = await update.message.reply_text(
+            "⏳ 正在生成损益表，请稍候...",
+            parse_mode=ParseMode.MARKDOWN
         )
         
+        sheets_manager = SheetsManager()
+        pl_data = await sheets_manager.generate_pl_report(month_input)
+        
+        # 删除处理中的消息
+        await processing_message.delete()
+        
+        # 显示损益表
+        return await display_pl_report(update, context, pl_data, month_input, is_message=True)
+        
     except ValueError:
-        await update.message.reply_text("⚠️ 请输入正确的日期格式（YYYY-MM）")
+        await update.message.reply_text(
+            "⚠️ 请输入正确的日期格式（YYYY-MM）",
+            parse_mode=ParseMode.MARKDOWN
+        )
         return REPORT_MONTH
     except Exception as e:
-        logger.error(f"生成自定义报表失败: {e}")
-        await update.message.reply_text("❌ 生成报表失败，请重试")
+        logger.error(f"生成自定义月份损益表失败: {e}")
+        await update.message.reply_text(
+            "❌ 生成损益表失败，请重试",
+            parse_mode=ParseMode.MARKDOWN
+        )
     
     return ConversationHandler.END
 
-async def report_yearly_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """生成年度汇总报表"""
+async def report_pl_yearly(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """生成年度损益表"""
     query = update.callback_query
     await query.answer()
     
     try:
+        # 发送处理中的消息
+        await query.edit_message_text(
+            "⏳ 正在生成年度损益表，请稍候...",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        
         sheets_manager = SheetsManager()
         current_year = datetime.now().year
-        report_data = await sheets_manager.generate_yearly_report(current_year)
+        pl_data = await sheets_manager.generate_yearly_pl_report(current_year)
         
-        keyboard = [[InlineKeyboardButton("🔙 返回报表菜单", callback_data="menu_report")]]
+        # 显示年度损益表
+        return await display_pl_report(update, context, pl_data, str(current_year), is_yearly=True)
+        
+    except Exception as e:
+        logger.error(f"生成年度损益表失败: {e}")
+        
+        keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="report_pl")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        report_message = f"""
-📈 *{current_year} 年度汇总报表*
-
-💰 *年度收入*
-• 总销售额：¥{report_data['total_sales']:,.2f}
-• 总佣金：¥{report_data['total_commission']:,.2f}
-
-💸 *年度支出*
-• 采购支出：¥{report_data['purchase_cost']:,.2f}
-• 水电网络：¥{report_data['utility_cost']:,.2f}
-• 人工工资：¥{report_data['salary_cost']:,.2f}
-• 其他支出：¥{report_data['other_cost']:,.2f}
-• 总支出：¥{report_data['total_cost']:,.2f}
-
-📊 *年度分析*
-• 毛利润：¥{report_data['gross_profit']:,.2f}
-• 净利润：¥{report_data['net_profit']:,.2f}
-• 平均月收入：¥{report_data['avg_monthly_income']:,.2f}
-• 平均月支出：¥{report_data['avg_monthly_cost']:,.2f}
-        """
-        
         await query.edit_message_text(
-            report_message,
+            "❌ 生成年度损益表失败，请重试",
+            reply_markup=reply_markup
+        )
+    
+    return ConversationHandler.END
+
+async def display_pl_report(update: Update, context: ContextTypes.DEFAULT_TYPE, pl_data, period, is_message=False, is_yearly=False) -> int:
+    """显示损益表报告"""
+    # 构建损益表消息
+    period_type = "年度" if is_yearly else "月度"
+    
+    pl_message = f"""
+💹 *{period} {period_type}损益表 (P&L)*
+
+📈 *收入*
+• 销售收入：RM{pl_data['revenue']:,.2f}
+
+📉 *成本*
+• 商品成本：RM{pl_data['cost_of_goods']:,.2f}
+• 佣金支出：RM{pl_data['commission_cost']:,.2f}
+
+🧮 *毛利润*：RM{pl_data['gross_profit']:,.2f}
+
+💸 *营业费用*
+• 人工工资：RM{pl_data['salary_expense']:,.2f}
+• 水电网络：RM{pl_data['utility_expense']:,.2f}
+• 其他费用：RM{pl_data['other_expense']:,.2f}
+• 总营业费用：RM{pl_data['total_operating_expense']:,.2f}
+
+💰 *净利润*：RM{pl_data['net_profit']:,.2f}
+• 利润率：{pl_data['profit_margin']:.1f}%
+"""
+    
+    # 添加按钮
+    keyboard = [
+        [InlineKeyboardButton("💾 同步到Google表格", callback_data=f"pl_sync_{period}")],
+        [InlineKeyboardButton("🔙 返回", callback_data="report_pl")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # 根据调用方式显示消息
+    if is_message:
+        await update.message.reply_text(
+            pl_message,
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=reply_markup
         )
+    else:
+        query = update.callback_query
+        await query.edit_message_text(
+            pl_message,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=reply_markup
+        )
+    
+    return ConversationHandler.END
+
+async def report_pl_sync(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """同步损益表到Google表格"""
+    query = update.callback_query
+    await query.answer()
+    
+    period = query.data.split("_")[3]  # 格式为 "pl_sync_yyyy" 或 "pl_sync_yyyy-mm"
+    
+    # 发送处理中的消息
+    await query.edit_message_text(
+        "⏳ 正在同步损益表到Google表格，请稍候...",
+        parse_mode=ParseMode.MARKDOWN
+    )
+    
+    # 判断是年度还是月度
+    is_yearly = len(period) == 4  # 年份格式为4位数字
+    
+    sheets_manager = SheetsManager()
+    
+    try:
+        # 直接使用export_pl_report导出损益表（替换之前的sync函数）
+        if is_yearly:
+            # 导出年度损益表
+            result = sheets_manager.export_pl_report(int(period))
+        else:
+            # 对于月度报表，提取年份
+            year = int(period.split('-')[0])
+            # 导出该年的损益表
+            result = sheets_manager.export_pl_report(year)
+        
+        # 显示同步结果
+        keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="report_pl")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        if result:
+            await query.edit_message_text(
+                f"✅ 损益表已成功导出到Google表格\n\n📊 工作表: {result['sheet_name']}\n🔗 [点击查看报表]({result['sheet_url']})",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=reply_markup,
+                disable_web_page_preview=True
+            )
+        else:
+            await query.edit_message_text(
+                "❌ 导出失败，请重试",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=reply_markup
+            )
+    
+    except Exception as e:
+        logger.error(f"导出损益表失败: {e}")
+        
+        keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="report_pl")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "❌ 导出损益表失败，请重试",
+            reply_markup=reply_markup
+        )
+    
+    return ConversationHandler.END
+
+async def report_export_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """显示报表导出菜单"""
+    query = update.callback_query
+    await query.answer()
+    
+    keyboard = [
+        [InlineKeyboardButton("📊 销售报表", callback_data="export_sales")],
+        [InlineKeyboardButton("💸 支出报表", callback_data="export_expenses")],
+        [InlineKeyboardButton("💹 损益报表", callback_data="export_pl")],
+        [InlineKeyboardButton("🔙 返回报表菜单", callback_data="menu_report")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    message = "📑 *报表导出*\n\n请选择要导出的报表类型："
+    
+    await query.edit_message_text(
+        message,
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=reply_markup
+    )
+    
+    return ConversationHandler.END
+
+async def report_export_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理报表导出请求"""
+    query = update.callback_query
+    await query.answer()
+    
+    export_type = query.data.replace("export_", "")
+    
+    # 发送处理中的消息
+    await query.edit_message_text(
+        "⏳ 正在准备导出报表，请稍候...",
+        parse_mode=ParseMode.MARKDOWN
+    )
+    
+    try:
+        sheets_manager = SheetsManager()
+        current_year = datetime.now().year
+        
+        # 根据导出类型处理
+        if export_type == "sales":
+            result = sheets_manager.export_sales_report(current_year)
+            report_name = "销售报表"
+        elif export_type == "expenses":
+            result = sheets_manager.export_expenses_report(current_year)
+            report_name = "支出报表"
+        elif export_type == "pl":
+            result = sheets_manager.export_pl_report(current_year)
+            report_name = "损益报表"
+        else:
+            raise ValueError(f"未知的导出类型: {export_type}")
+        
+        # 显示导出结果
+        keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="report_export")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        if result and 'sheet_url' in result:
+            message = f"""
+✅ *{report_name}导出成功*
+
+📊 报表已导出到Google表格
+📅 报表期间: {current_year}年
+🔗 [点击查看报表]({result['sheet_url']})
+            """
+            
+            await query.edit_message_text(
+                message,
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=reply_markup,
+                disable_web_page_preview=True
+            )
+        else:
+            await query.edit_message_text(
+                f"❌ {report_name}导出失败，请重试",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=reply_markup
+            )
         
     except Exception as e:
-        logger.error(f"生成年度报表失败: {e}")
-        await query.edit_message_text("❌ 生成报表失败，请重试")
+        logger.error(f"导出报表失败: {e}")
+        
+        keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="report_export")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "❌ 导出报表失败，请重试",
+            reply_markup=reply_markup
+        )
+    
+    return ConversationHandler.END
 
 # ====================================
 # 回调处理区 - 所有 inline keyboard 回调
@@ -1782,13 +2180,15 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     # 报表生成回调
     elif query.data == "back_report":
         return await report_menu(update, context)
-    elif query.data == "report_current":
-        return await report_current_handler(update, context)
-    elif query.data == "report_custom":
-        return await report_custom_handler(update, context)
-    elif query.data == "report_yearly":
-        await report_yearly_handler(update, context)
-        return ConversationHandler.END
+    elif query.data == "report_export":
+        return await report_export_menu(update, context)
+    # 报表导出回调
+    elif query.data == "export_sales":
+        return await report_export_handler(update, context)
+    elif query.data == "export_expenses":
+        return await report_export_handler(update, context)
+    elif query.data == "export_pl":
+        return await report_export_handler(update, context)
     
     # 默认返回主菜单
     else:
@@ -1975,6 +2375,27 @@ def get_conversation_handlers():
             ],
             COST_CONFIRM: [
                 CallbackQueryHandler(cost_save_handler, pattern="^cost_save$")
+            ],
+            # 添加工资计算相关状态
+            WORKER_BASIC_SALARY: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, worker_basic_salary_handler)
+            ],
+            WORKER_ALLOWANCE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, worker_allowance_handler),
+                CallbackQueryHandler(skip_allowance_handler, pattern="^skip_allowance$")
+            ],
+            WORKER_OT: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, worker_overtime_handler),
+                CallbackQueryHandler(skip_overtime_handler, pattern="^skip_overtime$")
+            ],
+            WORKER_DEDUCTIONS: [
+                CallbackQueryHandler(worker_deductions_handler, pattern="^deductions_")
+            ],
+            WORKER_EPF_RATE: [
+                CallbackQueryHandler(worker_epf_rate_handler, pattern="^epf_rate_")
+            ],
+            WORKER_CONFIRM: [
+                CallbackQueryHandler(cost_save_handler, pattern="^cost_save$")
             ]
         },
         fallbacks=[
@@ -1989,11 +2410,10 @@ def get_conversation_handlers():
     # 报表生成会话处理器
     report_conversation = ConversationHandler(
         entry_points=[
-            CallbackQueryHandler(report_custom_handler, pattern="^report_custom$")
+            CommandHandler("report", report_command)
         ],
         states={
-            REPORT_TYPE: [CallbackQueryHandler(callback_query_handler, pattern="^report_")],
-            REPORT_MONTH: [MessageHandler(filters.TEXT & ~filters.COMMAND, report_month_handler)]
+            REPORT_TYPE: [CallbackQueryHandler(callback_query_handler, pattern="^report_")]
         },
         fallbacks=[
             CallbackQueryHandler(callback_query_handler),
@@ -2026,11 +2446,13 @@ def register_handlers(application):
     application.add_handler(CommandHandler("cancel", cancel_command))
     application.add_handler(CommandHandler("Setting", setting_command))
     application.add_handler(CommandHandler("SaleInvoice", sale_invoice_command))
+    application.add_handler(CommandHandler("report", report_command))  # 添加 /report 命令处理器
     
     # 回调查询处理器 (放在会话处理器之后)
     application.add_handler(CallbackQueryHandler(sales_callback_handler, pattern='^sales_'))
     application.add_handler(CallbackQueryHandler(expenses_callback_handler, pattern='^(cost_|expenses_)'))
     application.add_handler(CallbackQueryHandler(report_callback_handler, pattern='^report_'))
+    application.add_handler(CallbackQueryHandler(report_callback_handler, pattern='^export_'))  # 添加报表导出回调处理器
     application.add_handler(CallbackQueryHandler(close_session_handler, pattern='^close_session$'))
     application.add_handler(CallbackQueryHandler(general_callback_handler))
     
@@ -2866,23 +3288,23 @@ async def worker_select_handler(update: Update, context: ContextTypes.DEFAULT_TY
         context.user_data['cost_worker'] = worker_name
         context.user_data['cost_desc'] = f"Salary for {worker_name}"  # 自动设置描述
         
-        # 显示金额输入界面
+        # 显示基本工资输入界面
         keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
-            f"👷 <b>Worker:</b> {worker_name}\n\n<b>Please enter salary amount:</b>",
+            f"👷 <b>Worker:</b> {worker_name}\n\n<b>Please enter basic salary amount:</b>",
             parse_mode=ParseMode.HTML,
             reply_markup=reply_markup
         )
         
-        return COST_AMOUNT
+        # 设置状态进入工资计算流程
+        return WORKER_BASIC_SALARY
     
     # 未知回调数据
     await query.edit_message_text("❌ Unknown operation, please try again.")
     return ConversationHandler.END
 
-# 添加自定义工作人员名称输入处理
 async def custom_worker_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """处理自定义工作人员名称输入"""
     # 检查是否正在等待自定义工作人员输入
@@ -2897,13 +3319,479 @@ async def custom_worker_handler(update: Update, context: ContextTypes.DEFAULT_TY
     # 清除等待标记
     context.user_data.pop('waiting_for_custom_worker', None)
     
-    # 显示金额输入界面
+    # 显示基本工资输入界面
     keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_html(
-        f"👷 <b>Worker:</b> {worker_name}\n\n<b>Please enter salary amount:</b>",
+        f"👷 <b>Worker:</b> {worker_name}\n\n<b>Please enter basic salary amount:</b>",
         reply_markup=reply_markup
     )
     
-    return COST_AMOUNT
+    return WORKER_BASIC_SALARY
+
+# ====================================
+# 工人薪资计算区 - 基本工资、津贴、加班、EPF/SOCSO
+# ====================================
+
+async def worker_basic_salary_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理工人基本工资输入"""
+    try:
+        basic_salary_text = update.message.text.strip()
+        # 检查金额格式并转换为浮点数
+        clean_amount = basic_salary_text.replace(',', '').replace('RM', '').replace('¥', '').replace('$', '').replace('€', '')
+        basic_salary = float(clean_amount)
+        
+        # 存储基本工资
+        context.user_data['basic_salary'] = basic_salary
+        
+        # 询问津贴
+        keyboard = [[InlineKeyboardButton("⏭️ Skip (0)", callback_data="skip_allowance")],
+                   [InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_html(
+            f"💰 <b>Basic Salary:</b> RM{basic_salary:,.2f}\n\n"
+            f"<b>Please enter allowance amount (if any):</b>",
+            reply_markup=reply_markup
+        )
+        
+        return WORKER_ALLOWANCE
+        
+    except ValueError:
+        # 金额格式不正确
+        await update.message.reply_text("⚠️ <b>Invalid amount format</b>\n\nPlease enter a valid number.", parse_mode=ParseMode.HTML)
+        return WORKER_BASIC_SALARY
+
+async def worker_allowance_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理工人津贴输入"""
+    try:
+        allowance_text = update.message.text.strip()
+        # 检查金额格式并转换为浮点数
+        clean_amount = allowance_text.replace(',', '').replace('RM', '').replace('¥', '').replace('$', '').replace('€', '')
+        allowance = float(clean_amount)
+        
+        # 存储津贴
+        context.user_data['allowance'] = allowance
+        
+        # 询问加班费
+        keyboard = [[InlineKeyboardButton("⏭️ Skip (0)", callback_data="skip_overtime")],
+                   [InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        basic_salary = context.user_data.get('basic_salary', 0)
+        
+        await update.message.reply_html(
+            f"💰 <b>Basic Salary:</b> RM{basic_salary:,.2f}\n"
+            f"💵 <b>Allowance:</b> RM{allowance:,.2f}\n\n"
+            f"<b>Please enter overtime amount (if any):</b>",
+            reply_markup=reply_markup
+        )
+        
+        return WORKER_OT
+        
+    except ValueError:
+        # 金额格式不正确
+        await update.message.reply_text("⚠️ <b>Invalid amount format</b>\n\nPlease enter a valid number.", parse_mode=ParseMode.HTML)
+        return WORKER_ALLOWANCE
+
+async def skip_allowance_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """跳过津贴输入"""
+    query = update.callback_query
+    await query.answer()
+    
+    # 设置津贴为0
+    context.user_data['allowance'] = 0
+    
+    # 询问加班费
+    keyboard = [[InlineKeyboardButton("⏭️ Skip (0)", callback_data="skip_overtime")],
+               [InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    basic_salary = context.user_data.get('basic_salary', 0)
+    
+    await query.edit_message_text(
+        f"💰 <b>Basic Salary:</b> RM{basic_salary:,.2f}\n"
+        f"💵 <b>Allowance:</b> RM0.00\n\n"
+        f"<b>Please enter overtime amount (if any):</b>",
+        parse_mode=ParseMode.HTML,
+        reply_markup=reply_markup
+    )
+    
+    return WORKER_OT
+
+async def worker_overtime_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理工人加班费输入"""
+    try:
+        overtime_text = update.message.text.strip()
+        # 检查金额格式并转换为浮点数
+        clean_amount = overtime_text.replace(',', '').replace('RM', '').replace('¥', '').replace('$', '').replace('€', '')
+        overtime = float(clean_amount)
+        
+        # 存储加班费
+        context.user_data['overtime'] = overtime
+        
+        # 进入扣除项选择界面
+        return await show_deductions_options(update, context)
+        
+    except ValueError:
+        # 金额格式不正确
+        await update.message.reply_text("⚠️ <b>Invalid amount format</b>\n\nPlease enter a valid number.", parse_mode=ParseMode.HTML)
+        return WORKER_OT
+
+async def skip_overtime_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """跳过加班费输入"""
+    query = update.callback_query
+    await query.answer()
+    
+    # 设置加班费为0
+    context.user_data['overtime'] = 0
+    
+    # 进入扣除项选择界面
+    return await show_deductions_options(update, context, from_callback=True)
+
+async def show_deductions_options(update: Update, context: ContextTypes.DEFAULT_TYPE, from_callback=False) -> int:
+    """显示法定扣除项选择界面"""
+    # 准备选择按钮
+    keyboard = [
+        [InlineKeyboardButton("✅ EPF + SOCSO", callback_data="deductions_both")],
+        [InlineKeyboardButton("💰 EPF Only", callback_data="deductions_epf")],
+        [InlineKeyboardButton("🩺 SOCSO Only", callback_data="deductions_socso")],
+        [InlineKeyboardButton("⏭️ No Deductions", callback_data="deductions_none")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # 获取已输入的薪资信息
+    basic_salary = context.user_data.get('basic_salary', 0)
+    allowance = context.user_data.get('allowance', 0)
+    overtime = context.user_data.get('overtime', 0)
+    
+    message = f"""
+👷 <b>WORKER SALARY DETAILS</b>
+
+💰 <b>Basic Salary:</b> RM{basic_salary:,.2f}
+💵 <b>Allowance:</b> RM{allowance:,.2f}
+⏱️ <b>Overtime:</b> RM{overtime:,.2f}
+
+<b>Please select statutory deductions:</b>
+- EPF: Employee 11%, Employer 13%
+- SOCSO: Employee 0.5%, Employer 1.75%
+"""
+    
+    if from_callback:
+        query = update.callback_query
+        await query.edit_message_text(
+            message,
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+    else:
+        await update.message.reply_html(
+            message,
+            reply_markup=reply_markup
+        )
+    
+    return WORKER_DEDUCTIONS
+
+async def worker_deductions_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理法定扣除项选择"""
+    query = update.callback_query
+    await query.answer()
+    
+    deduction_type = query.data.replace("deductions_", "")
+    
+    # 根据选择设置EPF和SOCSO启用状态
+    if deduction_type == "both":
+        context.user_data['epf_enabled'] = True
+        context.user_data['socso_enabled'] = True
+        
+        # 询问雇主EPF缴费比例
+        return await show_epf_rate_options(update, context)
+        
+    elif deduction_type == "epf":
+        context.user_data['epf_enabled'] = True
+        context.user_data['socso_enabled'] = False
+        
+        # 询问雇主EPF缴费比例
+        return await show_epf_rate_options(update, context)
+        
+    elif deduction_type == "socso":
+        context.user_data['epf_enabled'] = False
+        context.user_data['socso_enabled'] = True
+        
+        # 计算工资并跳到确认界面
+        return await calculate_and_show_salary_confirmation(update, context)
+        
+    elif deduction_type == "none":
+        context.user_data['epf_enabled'] = False
+        context.user_data['socso_enabled'] = False
+        
+        # 计算工资并跳到确认界面
+        return await calculate_and_show_salary_confirmation(update, context)
+    
+    # 未知选择，返回扣除项选择界面
+    await query.edit_message_text(
+        "⚠️ <b>Invalid selection</b>\n\nPlease select a valid option.",
+        parse_mode=ParseMode.HTML
+    )
+    return await show_deductions_options(update, context, from_callback=True)
+
+async def show_epf_rate_options(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """显示雇主EPF比例选择界面"""
+    query = update.callback_query
+    
+    keyboard = [
+        [InlineKeyboardButton("13%", callback_data="epf_rate_13")],
+        [InlineKeyboardButton("12%", callback_data="epf_rate_12")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # 获取已输入的薪资信息
+    basic_salary = context.user_data.get('basic_salary', 0)
+    
+    message = f"""
+👷 <b>EPF EMPLOYER CONTRIBUTION RATE</b>
+
+💰 <b>Basic Salary:</b> RM{basic_salary:,.2f}
+
+<b>Please select the EPF employer contribution rate:</b>
+- Standard rate: 13%
+- Alternative rate: 12%
+"""
+    
+    await query.edit_message_text(
+        message,
+        parse_mode=ParseMode.HTML,
+        reply_markup=reply_markup
+    )
+    
+    return WORKER_EPF_RATE
+
+async def worker_epf_rate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理雇主EPF比例选择"""
+    query = update.callback_query
+    await query.answer()
+    
+    rate_data = query.data.replace("epf_rate_", "")
+    
+    try:
+        employer_epf_rate = int(rate_data)
+        context.user_data['employer_epf_rate'] = employer_epf_rate
+        
+        # 计算工资并跳到确认界面
+        return await calculate_and_show_salary_confirmation(update, context)
+        
+    except ValueError:
+        # 比例格式不正确
+        await query.edit_message_text(
+            "⚠️ <b>Invalid rate</b>\n\nPlease select a valid option.",
+            parse_mode=ParseMode.HTML
+        )
+        return await show_epf_rate_options(update, context)
+
+async def calculate_and_show_salary_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """计算工资并显示确认界面"""
+    query = update.callback_query
+    
+    # 获取薪资信息
+    basic_salary = context.user_data.get('basic_salary', 0)
+    allowance = context.user_data.get('allowance', 0)
+    overtime = context.user_data.get('overtime', 0)
+    epf_enabled = context.user_data.get('epf_enabled', False)
+    socso_enabled = context.user_data.get('socso_enabled', False)
+    
+    # 计算EPF和SOCSO
+    epf_employee = 0
+    epf_employer = 0
+    socso_employee = 0
+    socso_employer = 0
+    
+    if epf_enabled:
+        # 员工EPF固定为11%
+        epf_employee = basic_salary * 0.11
+        
+        # 雇主EPF可能是12%或13%
+        employer_epf_rate = context.user_data.get('employer_epf_rate', 13) / 100
+        epf_employer = basic_salary * employer_epf_rate
+    
+    if socso_enabled:
+        # 员工SOCSO为0.5%
+        socso_employee = basic_salary * 0.005
+        
+        # 雇主SOCSO为1.75%
+        socso_employer = basic_salary * 0.0175
+    
+    # 计算净工资
+    net_salary = basic_salary + allowance + overtime - epf_employee - socso_employee
+    
+    # 存储计算结果
+    context.user_data['epf_employee'] = epf_employee
+    context.user_data['epf_employer'] = epf_employer
+    context.user_data['socso_employee'] = socso_employee
+    context.user_data['socso_employer'] = socso_employer
+    context.user_data['net_salary'] = net_salary
+    
+    # 总费用（包括雇主需要额外承担的部分）
+    total_employer_cost = basic_salary + allowance + overtime + epf_employer + socso_employer
+    context.user_data['total_employer_cost'] = total_employer_cost
+    
+    # 设置费用金额为净工资
+    context.user_data['cost_amount'] = net_salary
+    
+    # 显示确认界面
+    keyboard = [
+        [InlineKeyboardButton("✅ Save", callback_data="cost_save")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="back_cost")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    worker_name = context.user_data.get('cost_worker', '')
+    
+    message = f"""
+👷 <b>WORKER SALARY CONFIRMATION</b>
+
+<b>Worker:</b> {worker_name}
+
+<b>Income:</b>
+💰 Basic Salary: RM{basic_salary:,.2f}
+💵 Allowance: RM{allowance:,.2f}
+⏱️ Overtime: RM{overtime:,.2f}
+
+<b>Statutory Deductions:</b>
+"""
+    
+    if epf_enabled:
+        employer_epf_rate = context.user_data.get('employer_epf_rate', 13)
+        message += f"💼 EPF (Employee 11%): RM{epf_employee:,.2f}\n"
+        message += f"🏢 EPF (Employer {employer_epf_rate}%): RM{epf_employer:,.2f}\n"
+    
+    if socso_enabled:
+        message += f"🩺 SOCSO (Employee 0.5%): RM{socso_employee:,.2f}\n"
+        message += f"🏢 SOCSO (Employer 1.75%): RM{socso_employer:,.2f}\n"
+    
+    message += f"""
+<b>Summary:</b>
+🧾 Net Salary: RM{net_salary:,.2f}
+💶 Total Employer Cost: RM{total_employer_cost:,.2f}
+
+<b>Please confirm the salary details:</b>
+"""
+    
+    await query.edit_message_text(
+        message,
+        parse_mode=ParseMode.HTML,
+        reply_markup=reply_markup
+    )
+    
+    return WORKER_CONFIRM
+
+async def report_custom_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """自定义月份报表"""
+    query = update.callback_query
+    await query.answer()
+    
+    keyboard = [[InlineKeyboardButton("❌ 取消", callback_data="back_report")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        "🗓️ 请输入月份（格式：YYYY-MM，如：2024-03）：",
+        reply_markup=reply_markup
+    )
+    
+    # 清除状态标记，表示不是等待损益表月份输入
+    context.user_data['waiting_for_pl_month'] = False
+    
+    return REPORT_MONTH
+
+async def report_month_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理自定义月份输入"""
+    try:
+        month_input = update.message.text.strip()
+        # 验证日期格式
+        datetime.strptime(month_input, '%Y-%m')
+        
+        sheets_manager = SheetsManager()
+        report_data = await sheets_manager.generate_monthly_report(month_input)
+        
+        keyboard = [[InlineKeyboardButton("🔙 返回报表菜单", callback_data="menu_report")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        report_message = f"""
+📊 *{month_input} 月度报表*
+
+💰 *收入统计*
+• 总销售额：RM{report_data['total_sales']:,.2f}
+• 总佣金：RM{report_data['total_commission']:,.2f}
+
+💸 *支出统计*
+• 采购支出：RM{report_data['purchase_cost']:,.2f}
+• 水电网络：RM{report_data['utility_cost']:,.2f}
+• 人工工资：RM{report_data['salary_cost']:,.2f}
+• 其他支出：RM{report_data['other_cost']:,.2f}
+• 总支出：RM{report_data['total_cost']:,.2f}
+
+📈 *盈亏分析*
+• 毛利润：RM{report_data['gross_profit']:,.2f}
+• 净利润：RM{report_data['net_profit']:,.2f}
+        """
+        
+        await update.message.reply_text(
+            report_message,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=reply_markup
+        )
+        
+    except ValueError:
+        await update.message.reply_text("⚠️ 请输入正确的日期格式（YYYY-MM）")
+        return REPORT_MONTH
+    except Exception as e:
+        logger.error(f"生成自定义报表失败: {e}")
+        await update.message.reply_text("❌ 生成报表失败，请重试")
+    
+    return ConversationHandler.END
+
+async def report_yearly_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """生成年度汇总报表"""
+    query = update.callback_query
+    await query.answer()
+    
+    try:
+        sheets_manager = SheetsManager()
+        current_year = datetime.now().year
+        report_data = await sheets_manager.generate_yearly_report(current_year)
+        
+        keyboard = [[InlineKeyboardButton("🔙 返回报表菜单", callback_data="menu_report")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        report_message = f"""
+📈 *{current_year} 年度汇总报表*
+
+💰 *年度收入*
+• 总销售额：RM{report_data['total_sales']:,.2f}
+• 总佣金：RM{report_data['total_commission']:,.2f}
+
+💸 *年度支出*
+• 采购支出：RM{report_data['purchase_cost']:,.2f}
+• 水电网络：RM{report_data['utility_cost']:,.2f}
+• 人工工资：RM{report_data['salary_cost']:,.2f}
+• 其他支出：RM{report_data['other_cost']:,.2f}
+• 总支出：RM{report_data['total_cost']:,.2f}
+
+📊 *年度分析*
+• 毛利润：RM{report_data['gross_profit']:,.2f}
+• 净利润：RM{report_data['net_profit']:,.2f}
+• 平均月收入：RM{report_data['avg_monthly_income']:,.2f}
+• 平均月支出：RM{report_data['avg_monthly_cost']:,.2f}
+        """
+        
+        await query.edit_message_text(
+            report_message,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=reply_markup
+        )
+        
+    except Exception as e:
+        logger.error(f"生成年度报表失败: {e}")
+        await query.edit_message_text("❌ 生成报表失败，请重试")
