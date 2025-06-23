@@ -33,7 +33,6 @@ class GoogleDriveUploader:
         self.drive_service = None
         # 延迟初始化FOLDER_IDS，确保环境变量已经设置
         self.FOLDER_IDS = {}
-            "Purchasing": os.getenv("DRIVE_FOLDER_PURCHASING"),
         self.EXPENSE_TYPE_MAPPING = {
             "Electricity Bill": "electricity",
             "Water Bill": "water",
@@ -48,13 +47,12 @@ class GoogleDriveUploader:
     def _initialize_folders(self):
         """初始化文件夹ID映射，确保使用最新的环境变量"""
         self.FOLDER_IDS = {
-            "Purchasing": os.getenv("DRIVE_FOLDER_PURCHASING"),
             "electricity": os.getenv('DRIVE_FOLDER_ELECTRICITY'),  # 电费收据文件夹
             "water": os.getenv('DRIVE_FOLDER_WATER'),             # 水费收据文件夹
             "Purchasing": os.getenv('DRIVE_FOLDER_PURCHASING'),    # 购买杂货收据文件夹
             "wifi": os.getenv('DRIVE_FOLDER_WIFI'),                # WiFi收据文件夹
             "invoice_pdf": os.getenv('DRIVE_FOLDER_INVOICE_PDF'),   # 发票PDF文件夹
-            "supplier_other": os.getenv('DRIVE_FOLDER_SUPPLIER_OTHER'),  # Purchasing > Other的自定义供应商文件夹
+            "supplier_other": os.getenv("DRIVE_FOLDER_PURCHASING"),  # Purchasing > Other的自定义供应商文件夹
             "Other": os.getenv('DRIVE_FOLDER_PURCHASING_OTHER')    # Other类型的费用文件夹
         }
         logger.info(f"已初始化文件夹ID映射: {self.FOLDER_IDS}")
@@ -131,8 +129,6 @@ class GoogleDriveUploader:
             raise
     
     def _get_folder_id(self, expense_type: str) -> Optional[str]:
-        expense_type_lower = expense_type.lower().strip()
-        logger.info(f"🧠 判定类型: {expense_type_lower}")
         """根据费用类型获取对应的文件夹ID"""
         logger.info(f"获取文件夹ID，费用类型: {expense_type}")
         
@@ -140,22 +136,7 @@ class GoogleDriveUploader:
         if expense_type == "invoice_pdf":
             folder_id = os.getenv('DRIVE_FOLDER_INVOICE_PDF')
             logger.info(f"发票PDF专用文件夹ID: {folder_id}")
-        if "supplier" in expense_type_lower:
-            return self.FOLDER_IDS.get("Supplier")
-        elif "other" in expense_type_lower and "income" not in expense_type_lower:
-            return self.FOLDER_IDS.get("Other")
-        elif "salary" in expense_type_lower:
-            return self.FOLDER_IDS.get("Salary")
-        elif "claim" in expense_type_lower:
-            return self.FOLDER_IDS.get("Claim")
-        elif "offday" in expense_type_lower:
-            return self.FOLDER_IDS.get("Offday")
-        elif "income" in expense_type_lower or "topup" in expense_type_lower or "bonus" in expense_type_lower:
-            return self.FOLDER_IDS.get("Other_Income")
-        elif "purchase" in expense_type_lower or "purchasing" in expense_type_lower:
-            return self.FOLDER_IDS.get("Purchasing")
-        else:
-            return None
+            return folder_id
         
         # 1.5 处理自定义供应商(supplier_other)类型
         if expense_type.lower() == "supplier_other":
