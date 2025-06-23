@@ -40,6 +40,9 @@ class GoogleSheetsManager:
         self.client = None
         self.spreadsheet = None
         self.spreadsheet_id = None
+        # 添加缓存属性
+        self._sales_records_cache = None
+        self._expenses_records_cache = None
         self._initialize_client()
     
     def _get_credentials(self) -> Credentials:
@@ -179,58 +182,49 @@ class GoogleSheetsManager:
     # 销售记录操作
     # =============================================================================
     
-    def add_sales_record(self, data: Dict[str, Any]) -> bool:
-        """添加销售记录"""
+    def get_sales_records(self, month: Optional[str] = None) -> List[Dict]:
+        """获取销售记录，优先从缓存读取"""
         try:
-            worksheet = self.get_worksheet(SHEET_NAMES['sales'])
-            if not worksheet:
-                return False
+            # 如果缓存不存在，则加载所有销售记录
+            if self._sales_records_cache is None:
+                self._load_sales_records_cache()
             
-            # 准备数据行
-            # 将佣金率转换为百分比格式
-            # 支持新旧两种键名(commission_rate和comm_rate)
-            commission_rate = data.get('commission_rate', data.get('comm_rate', 0))
-            commission_rate_display = f"{commission_rate * 100}%" if commission_rate else "0%"
+            # 如果不指定月份，返回所有记录
+            if month is None:
+                return self._sales_records_cache
             
-            # 处理日期格式，只保留日期部分
-            date_str = data.get('date', datetime.now().strftime('%Y-%m-%d'))
-            if ' ' in date_str:  # 如果包含时间，只取日期部分
-                date_str = date_str.split(' ')[0]
+            # 如果指定了月份，则过滤缓存中的记录
+            filtered_records = []
+            for record in self._sales_records_cache:
+                date = record.get('date', '')
+                if date.startswith(month):
+                    # 记录原始值和解析后的值，用于调试
+                    logger.info(f"销售记录 {date}: 原始金额={record.get('amount', 0)}")
+                    filtered_records.append(record)
             
-            row_data = [
-                date_str,                        # Date - 只显示日期
-                data.get('person', ''),          # PIC
-                '',                              # Invoice NO - 留空
-                data.get('bill_to', ''),         # Bill To
-                data.get('amount', 0),           # Amount
-                '',                              # Status - 留空
-                data.get('type', ''),            # Type
-                data.get('agent_name', ''),      # Agent Name
-                data.get('agent_ic', ''),        # IC
-                commission_rate_display,         # Comm Rate
-                data.get('commission_amount', data.get('comm_amount', 0)), # Comm Amount - 支持新旧两种键名
-                data.get('invoice_pdf', '')      # Invoice PDF
-            ]
+            # 记录找到的记录数量，用于调试
+            total_amount = sum(r['amount'] for r in filtered_records)
+            logger.info(f"月份 {month} 找到 {len(filtered_records)} 条销售记录，总金额: {total_amount}")
             
-            worksheet.append_row(row_data)
-            logger.info(f"✅ 销售记录添加成功: {data.get('amount')}")
-            return True
+            return filtered_records
             
         except Exception as e:
-            logger.error(f"❌ 添加销售记录失败: {e}")
-            return False
+            logger.error(f"❌ 获取销售记录失败: {e}")
+            return []
     
-    def get_sales_records(self, month: Optional[str] = None) -> List[Dict]:
-        """获取销售记录"""
+    def _load_sales_records_cache(self):
+        """加载所有销售记录到缓存"""
         try:
             worksheet = self.get_worksheet(SHEET_NAMES['sales'])
             if not worksheet:
-                return []
+                self._sales_records_cache = []
+                return
             
             # 获取所有数据（包括表头）
             all_values = worksheet.get_all_values()
             if not all_values or len(all_values) <= 1:  # 没有数据或只有表头
-                return []
+                self._sales_records_cache = []
+                return
             
             # 获取表头和数据
             headers = all_values[0]  # 第一行是表头
@@ -254,16 +248,8 @@ class GoogleSheetsManager:
                 # 获取字段值
                 date = record.get('Date', '')
                 
-                # 如果指定了月份，则过滤
-                if month and not date.startswith(month):
-                    continue
-                
                 # 构建标准化的记录
                 amount_value = self._parse_number(record.get('Amount', 0))
-                
-                # 记录原始值和解析后的值，用于调试
-                if month:
-                    logger.info(f"销售记录 {date}: 原始金额={record.get('Amount', 0)}, 解析后金额={amount_value}")
                 
                 formatted_record = {
                     'date': date,
@@ -282,16 +268,12 @@ class GoogleSheetsManager:
                 
                 formatted_records.append(formatted_record)
             
-            # 记录找到的记录数量，用于调试
-            if month:
-                total_amount = sum(r['amount'] for r in formatted_records)
-                logger.info(f"月份 {month} 找到 {len(formatted_records)} 条销售记录，总金额: {total_amount}")
-            
-            return formatted_records
+            logger.info(f"📊 已缓存 {len(formatted_records)} 条销售记录")
+            self._sales_records_cache = formatted_records
             
         except Exception as e:
-            logger.error(f"❌ 获取销售记录失败: {e}")
-            return []
+            logger.error(f"❌ 加载销售记录缓存失败: {e}")
+            self._sales_records_cache = []
     
     def _parse_number(self, value) -> float:
         """将各种格式的数值转换为浮点数"""
@@ -336,46 +318,92 @@ class GoogleSheetsManager:
         
         return 0.0
     
+    def add_sales_record(self, data: Dict[str, Any]) -> bool:
+        """添加销售记录"""
+        try:
+            worksheet = self.get_worksheet(SHEET_NAMES['sales'])
+            if not worksheet:
+                return False
+            
+            # 准备数据行
+            # 将佣金率转换为百分比格式
+            # 支持新旧两种键名(commission_rate和comm_rate)
+            commission_rate = data.get('commission_rate', data.get('comm_rate', 0))
+            commission_rate_display = f"{commission_rate * 100}%" if commission_rate else "0%"
+            
+            # 处理日期格式，只保留日期部分
+            date_str = data.get('date', datetime.now().strftime('%Y-%m-%d'))
+            if ' ' in date_str:  # 如果包含时间，只取日期部分
+                date_str = date_str.split(' ')[0]
+            
+            row_data = [
+                date_str,                        # Date - 只显示日期
+                data.get('person', ''),          # PIC
+                '',                              # Invoice NO - 留空
+                data.get('bill_to', ''),         # Bill To
+                data.get('amount', 0),           # Amount
+                '',                              # Status - 留空
+                data.get('type', ''),            # Type
+                data.get('agent_name', ''),      # Agent Name
+                data.get('agent_ic', ''),        # IC
+                commission_rate_display,         # Comm Rate
+                data.get('commission_amount', data.get('comm_amount', 0)), # Comm Amount - 支持新旧两种键名
+                data.get('invoice_pdf', '')      # Invoice PDF
+            ]
+            
+            worksheet.append_row(row_data)
+            logger.info(f"✅ 销售记录添加成功: {data.get('amount')}")
+            
+            # 清除缓存，确保下次获取最新数据
+            self._sales_records_cache = None
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ 添加销售记录失败: {e}")
+            return False
+    
     # =============================================================================
     # 费用记录操作
     # =============================================================================
     
-    def add_expense_record(self, data: Dict[str, Any]) -> bool:
-        """添加费用记录"""
+    def get_expense_records(self, month: Optional[str] = None) -> List[Dict]:
+        """获取费用记录，优先从缓存读取"""
         try:
-            worksheet = self.get_worksheet(SHEET_NAMES['expenses'])
-            if not worksheet:
-                return False
+            # 如果缓存不存在，则加载所有费用记录
+            if self._expenses_records_cache is None:
+                self._load_expense_records_cache()
             
-            row_data = [
-                data.get('date', datetime.now().strftime('%Y-%m-%d')),
-                data.get('expense_type', data.get('type', '')),  # 使用expense_type，兼容type
-                data.get('supplier', ''),
-                data.get('amount', 0),
-                data.get('category', ''),
-                data.get('notes', data.get('description', '')),  # 使用notes，兼容description
-                data.get('receipt', '')  # 添加收据链接字段
-            ]
+            # 如果不指定月份，返回所有记录
+            if month is None:
+                return self._expenses_records_cache
             
-            worksheet.append_row(row_data)
-            logger.info(f"✅ 费用记录添加成功: {data.get('amount')}")
-            return True
+            # 如果指定了月份，则过滤缓存中的记录
+            filtered_records = []
+            for record in self._expenses_records_cache:
+                date = record.get('date', '')
+                if date.startswith(month):
+                    filtered_records.append(record)
+            
+            return filtered_records
             
         except Exception as e:
-            logger.error(f"❌ 添加费用记录失败: {e}")
-            return False
+            logger.error(f"❌ 获取费用记录失败: {e}")
+            return []
     
-    def get_expense_records(self, month: Optional[str] = None) -> List[Dict]:
-        """获取费用记录"""
+    def _load_expense_records_cache(self):
+        """加载所有费用记录到缓存"""
         try:
             worksheet = self.get_worksheet(SHEET_NAMES['expenses'])
             if not worksheet:
-                return []
+                self._expenses_records_cache = []
+                return
             
             # 获取所有数据（包括表头）
             all_values = worksheet.get_all_values()
             if not all_values or len(all_values) <= 1:  # 没有数据或只有表头
-                return []
+                self._expenses_records_cache = []
+                return
             
             # 获取表头和数据
             headers = all_values[0]
@@ -399,10 +427,6 @@ class GoogleSheetsManager:
                 # 获取字段值
                 date = record.get('Date', '')
                 
-                # 如果指定了月份，则过滤
-                if month and not date.startswith(month):
-                    continue
-                
                 # 构建标准化的记录，确保同时支持API字段和表头字段
                 formatted_record = {
                     'date': date,
@@ -418,11 +442,41 @@ class GoogleSheetsManager:
                 
                 formatted_records.append(formatted_record)
             
-            return formatted_records
+            logger.info(f"📊 已缓存 {len(formatted_records)} 条费用记录")
+            self._expenses_records_cache = formatted_records
             
         except Exception as e:
-            logger.error(f"❌ 获取费用记录失败: {e}")
-            return []
+            logger.error(f"❌ 加载费用记录缓存失败: {e}")
+            self._expenses_records_cache = []
+    
+    def add_expense_record(self, data: Dict[str, Any]) -> bool:
+        """添加费用记录"""
+        try:
+            worksheet = self.get_worksheet(SHEET_NAMES['expenses'])
+            if not worksheet:
+                return False
+            
+            row_data = [
+                data.get('date', datetime.now().strftime('%Y-%m-%d')),
+                data.get('expense_type', data.get('type', '')),  # 使用expense_type，兼容type
+                data.get('supplier', ''),
+                data.get('amount', 0),
+                data.get('category', ''),
+                data.get('notes', data.get('description', '')),  # 使用notes，兼容description
+                data.get('receipt', '')  # 添加收据链接字段
+            ]
+            
+            worksheet.append_row(row_data)
+            logger.info(f"✅ 费用记录添加成功: {data.get('amount')}")
+            
+            # 清除缓存，确保下次获取最新数据
+            self._expenses_records_cache = None
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ 添加费用记录失败: {e}")
+            return False
     
     # =============================================================================
     # 代理商管理
@@ -1116,6 +1170,16 @@ class GoogleSheetsManager:
         except Exception as e:
             logger.error(f"❌ 导出损益表失败: {e}")
             return None
+
+    def refresh_data_cache(self):
+        """刷新所有数据缓存"""
+        logger.info("🔄 正在刷新数据缓存...")
+        self._sales_records_cache = None
+        self._expenses_records_cache = None
+        # 立即加载缓存
+        self._load_sales_records_cache()
+        self._load_expense_records_cache()
+        logger.info("✅ 数据缓存刷新完成")
 
 
 
