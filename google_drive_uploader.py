@@ -124,7 +124,7 @@ class GoogleDriveUploader:
             # 构建Drive服务
             self.drive_service = build('drive', 'v3', credentials=credentials)
             logger.info("Google Drive服务初始化成功")
-                    except Exception as e:
+        except Exception as e:
             logger.error(f"初始化Google Drive服务失败: {e}")
             raise
     
