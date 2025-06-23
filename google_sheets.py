@@ -349,11 +349,11 @@ class GoogleSheetsManager:
             
             row_data = [
                 data.get('date', datetime.now().strftime('%Y-%m-%d')),
-                data.get('type', ''),
+                data.get('expense_type', data.get('type', '')),  # 使用expense_type，兼容type
                 data.get('supplier', ''),
                 data.get('amount', 0),
                 data.get('category', ''),
-                data.get('description', ''),
+                data.get('notes', data.get('description', '')),  # 使用notes，兼容description
                 data.get('receipt', '')  # 添加收据链接字段
             ]
             
@@ -403,14 +403,16 @@ class GoogleSheetsManager:
                 if month and not date.startswith(month):
                     continue
                 
-                # 构建标准化的记录
+                # 构建标准化的记录，确保同时支持API字段和表头字段
                 formatted_record = {
                     'date': date,
                     'expense_type': record.get('Expense Type', ''),
+                    'type': record.get('Expense Type', ''),  # 兼容旧代码使用type字段
                     'supplier': record.get('Supplier', ''),
                     'amount': self._parse_number(record.get('Amount', 0)),
                     'category': record.get('Category', ''),
                     'notes': record.get('Notes', ''),
+                    'description': record.get('Notes', ''),  # 兼容旧代码使用description字段
                     'receipt': record.get('Receipt', '')  # 添加收据链接字段
                 }
                 
@@ -682,6 +684,7 @@ class GoogleSheetsManager:
             # 按类型统计费用
             expense_by_type = {}
             for record in expense_records:
+                # 确保从Expense Type和expense_type字段中获取类型
                 expense_type = record.get('Expense Type', record.get('expense_type', '其他'))
                 amount = self._parse_number(record.get('Amount', record.get('amount', 0)))
                 expense_by_type[expense_type] = expense_by_type.get(expense_type, 0) + amount
@@ -766,6 +769,7 @@ class GoogleSheetsManager:
             # 按类型统计费用
             expense_by_type = {}
             for record in expense_records:
+                # 确保从Expense Type和expense_type字段中获取类型
                 expense_type = record.get('Expense Type', record.get('expense_type', '其他'))
                 amount = self._parse_number(record.get('Amount', record.get('amount', 0)))
                 expense_by_type[expense_type] = expense_by_type.get(expense_type, 0) + amount
