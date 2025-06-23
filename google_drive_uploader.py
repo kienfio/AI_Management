@@ -138,7 +138,6 @@ class GoogleDriveUploader:
             # 构建Drive服务
             self.drive_service = build('drive', 'v3', credentials=credentials)
             logger.info("Google Drive服务初始化成功")
-        try:
         except Exception as e:
             logger.error(f"初始化Google Drive服务失败: {e}")
             raise
@@ -474,7 +473,6 @@ class GoogleDriveUploader:
                             'public_link': public_link
                         }
             
-        try:
             except Exception as e:
                 # 详细记录异常
                 logger.exception(f"🔥 文件上传严重失败: {str(e)}")
@@ -638,6 +636,5 @@ if __name__ == "__main__":
         print(f"发票PDF上传成功! 文件ID: {result['file_id']}")
         print(f"公开链接: {result['public_link']}")
         
-        try:
     except Exception as e:
         print(f"错误: {e}") 
