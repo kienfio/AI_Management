@@ -1202,16 +1202,22 @@ async def cost_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             "water bill": "water",
             "electricity bill": "electricity",
             "wifi bill": "wifi",
-            "purchasing": "purchasing",
+            "purchasing": "Purchasing",  # 修正为大写P，与文件夹ID映射保持一致
             "other": "Other"  # 添加Other类型映射
         }
+        
+        # 添加调试日志
+        logger.info(f"📋 费用类型映射前: '{cost_type}'")
         
         # 转换为小写进行匹配
         cost_type_lower = cost_type.lower()
         drive_folder_type = type_mapping.get(cost_type_lower, cost_type)
         
+        # 记录映射结果
+        logger.info(f"📋 费用类型映射后: '{drive_folder_type}'")
+        
         # 检查是否是自定义供应商，如果是则使用supplier_other文件夹
-        if context.user_data.get('is_custom_supplier') and cost_type == "Purchasing":
+        if context.user_data.get('is_custom_supplier') and (cost_type == "Purchasing" or cost_type_lower == "purchasing"):
             drive_folder_type = "supplier_other"
             logger.info("检测到自定义供应商，使用supplier_other文件夹")
         
@@ -1255,6 +1261,15 @@ async def cost_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             else:
                 # 普通收据上传
                 logger.info(f"⬆️ 上传收据，使用folder_type='{drive_folder_type}'")
+                
+                # 为Purchasing类型添加额外日志
+                if cost_type == "Purchasing" or cost_type_lower == "purchasing":
+                    logger.info(f"🛒 Purchasing上传前检查: cost_type='{cost_type}', drive_folder_type='{drive_folder_type}'")
+                    # 确保使用正确的大小写
+                    if drive_folder_type.lower() == "purchasing" and drive_folder_type != "Purchasing":
+                        drive_folder_type = "Purchasing"
+                        logger.info(f"🛒 修正Purchasing大小写: '{drive_folder_type}'")
+                
                 receipt_result = drive_uploader.upload_receipt(
                     file_stream, 
                     drive_folder_type,  # 使用映射后的类型
