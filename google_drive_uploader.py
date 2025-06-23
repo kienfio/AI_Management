@@ -39,8 +39,7 @@ class GoogleDriveUploader:
             "Purchasing": "Purchasing",
             "WiFi Bill": "wifi",
             "Other": "Other",
-            "Other Expense": "Other",
-            "Other Bill": "Other"  # 添加Other Bill映射
+            "Other Expense": "Other"
         }
         self._initialize_folders()
         self._initialize_service()
@@ -50,25 +49,12 @@ class GoogleDriveUploader:
         self.FOLDER_IDS = {
             "electricity": os.getenv('DRIVE_FOLDER_ELECTRICITY'),  # 电费收据文件夹
             "water": os.getenv('DRIVE_FOLDER_WATER'),             # 水费收据文件夹
-            "Purchasing": os.getenv('DRIVE_FOLDER_PURCHASING', '10t-PQiLF91bUrF3oqOCaSJvBuXDzVb9i'),    # 购买杂货收据文件夹
+            "Purchasing": os.getenv('DRIVE_FOLDER_PURCHASING'),    # 购买杂货收据文件夹
             "wifi": os.getenv('DRIVE_FOLDER_WIFI'),                # WiFi收据文件夹
             "invoice_pdf": os.getenv('DRIVE_FOLDER_INVOICE_PDF'),   # 发票PDF文件夹
-            "supplier_other": os.getenv('DRIVE_FOLDER_SUPPLIER_OTHER', '10t-PQiLF91bUrF3oqOCaSJvBuXDzVb9i'),  # Purchasing > Other的自定义供应商文件夹
+            "supplier_other": os.getenv('DRIVE_FOLDER_SUPPLIER_OTHER'),  # Purchasing > Other的自定义供应商文件夹
             "Other": os.getenv('DRIVE_FOLDER_PURCHASING_OTHER')    # Other类型的费用文件夹
         }
-        # 单独记录各类文件夹ID，确保正确设置
-        other_folder_id = os.getenv('DRIVE_FOLDER_PURCHASING_OTHER')
-        purchasing_folder_id = os.getenv('DRIVE_FOLDER_PURCHASING')
-        supplier_other_folder_id = os.getenv('DRIVE_FOLDER_SUPPLIER_OTHER')
-        
-        logger.info(f"🔹 Other文件夹ID: {other_folder_id}")
-        logger.info(f"🔹 Purchasing文件夹ID: {purchasing_folder_id}")
-        logger.info(f"🔹 Supplier Other文件夹ID: {supplier_other_folder_id}")
-        
-        # 检查文件夹ID是否正确设置
-        if not purchasing_folder_id:
-            logger.warning("⚠️ DRIVE_FOLDER_PURCHASING环境变量未设置或为空")
-        
         logger.info(f"已初始化文件夹ID映射: {self.FOLDER_IDS}")
     
     def reinitialize(self):
@@ -138,16 +124,13 @@ class GoogleDriveUploader:
             # 构建Drive服务
             self.drive_service = build('drive', 'v3', credentials=credentials)
             logger.info("Google Drive服务初始化成功")
-        except Exception as e:
+                    except Exception as e:
             logger.error(f"初始化Google Drive服务失败: {e}")
             raise
     
     def _get_folder_id(self, expense_type: str) -> Optional[str]:
         """根据费用类型获取对应的文件夹ID"""
         logger.info(f"获取文件夹ID，费用类型: {expense_type}")
-        
-        # 记录原始expense_type以便调试
-        logger.info(f"💼 _get_folder_id 原始类型: '{expense_type}'")
         
         # 1. 优先处理发票PDF专用文件夹
         if expense_type == "invoice_pdf":
@@ -157,24 +140,14 @@ class GoogleDriveUploader:
         
         # 1.5 处理自定义供应商(supplier_other)类型
         if expense_type.lower() == "supplier_other":
-            # 获取供应商other文件夹ID，如果不存在，则使用Purchasing文件夹ID作为备选
             folder_id = self.FOLDER_IDS.get("supplier_other")
-            if not folder_id:
-                folder_id = self.FOLDER_IDS.get("Purchasing")
-                logger.info(f"自定义供应商文件夹ID未设置，使用Purchasing文件夹ID作为备选: {folder_id}")
             logger.info(f"自定义供应商文件夹ID: {folder_id}")
             return folder_id
-        
-        # 1.55 处理采购(Purchasing)类型
-        if expense_type == "Purchasing" or expense_type == "purchasing":
-            folder_id = self.FOLDER_IDS.get("Purchasing")
-            logger.info(f"采购类型文件夹ID: {folder_id}")
-            return folder_id
             
-        # 1.6 处理Other类型支出 - 使用大小写不敏感比较
-        if expense_type.lower() in ["other", "other expense"] or expense_type.lower().startswith("other bill"):
+        # 1.6 处理Other类型支出
+        if expense_type == "Other":
             folder_id = self.FOLDER_IDS.get("Other")
-            logger.info(f"Other类型支出文件夹ID: {folder_id}, 原始类型: {expense_type}")
+            logger.info(f"Other类型支出文件夹ID: {folder_id}")
             return folder_id
         
         # 2. 处理其他费用类型
@@ -241,24 +214,8 @@ class GoogleDriveUploader:
             # 强制记录日志
             logger.info(f"⏫ 开始上传文件 | 类型: {receipt_type_or_name} | MIME: {mime_type}")
             
-            # 预处理收据类型 - 处理特殊格式
-            processed_type = receipt_type_or_name
-            if isinstance(receipt_type_or_name, str):
-                # 处理"Other Bill: xxx"格式
-                if receipt_type_or_name.lower().startswith("other bill:"):
-                    processed_type = "Other Bill"
-                    logger.info(f"🔄 检测到Other Bill格式，规范化为: {processed_type}")
-                # 处理purchasing格式（确保大小写正确）
-                elif receipt_type_or_name.lower() == "purchasing":
-                    processed_type = "Purchasing"  # 使用正确的大小写
-                    logger.info(f"🔄 统一Purchasing大小写: {processed_type}")
-                # 处理supplier_other格式
-                elif receipt_type_or_name.lower() == "supplier_other":
-                    processed_type = "supplier_other"  # 保持原样
-                    logger.info(f"🔄 检测到supplier_other类型: {processed_type}")
-            
             # 添加PDF专用上传逻辑
-            if processed_type == "invoice_pdf":
+            if receipt_type_or_name == "invoice_pdf":
                 logger.info("🔄 使用PDF专用上传逻辑")
                 return self._upload_invoice_pdf(file_path_or_stream, mime_type)
             
@@ -303,22 +260,21 @@ class GoogleDriveUploader:
             # 获取目标文件夹ID
             folder_id = None
             drive_folder_type = None
-            logger.info(f"🔍 收据类型原始值: '{receipt_type_or_name}', 处理后: '{processed_type}'")
-            if isinstance(processed_type, str):
+            if isinstance(receipt_type_or_name, str):
                 # 处理特殊情况
-                if processed_type == "Water Bill":
+                if receipt_type_or_name == "Water Bill":
                     drive_folder_type = "water"
                     folder_id = self._get_folder_id(drive_folder_type)
                     logger.info(f"Water Bill特殊处理，文件夹ID: {folder_id}")
-                elif processed_type == "Electricity Bill":
+                elif receipt_type_or_name == "Electricity Bill":
                     drive_folder_type = "electricity"
                     folder_id = self._get_folder_id(drive_folder_type)
                     logger.info(f"Electricity Bill特殊处理，文件夹ID: {folder_id}")
-                elif processed_type == "WiFi Bill":
+                elif receipt_type_or_name == "WiFi Bill":
                     drive_folder_type = "wifi"
                     folder_id = self.FOLDER_IDS.get(drive_folder_type)
                     logger.info(f"WiFi Bill特殊处理，直接获取wifi文件夹ID: {folder_id}")
-                elif processed_type == "invoice_pdf":
+                elif receipt_type_or_name == "invoice_pdf":
                     drive_folder_type = "invoice_pdf"
                     folder_id = self.FOLDER_IDS.get(drive_folder_type)
                     logger.info(f"Invoice PDF特殊处理，直接获取invoice_pdf文件夹ID: {folder_id}")
@@ -326,55 +282,18 @@ class GoogleDriveUploader:
                         folder_id = os.getenv('DRIVE_FOLDER_INVOICE_PDF')
                         logger.info(f"从环境变量获取PDF文件夹ID: {folder_id}")
                     logger.info(f"最终使用的Invoice PDF文件夹ID: {folder_id}")
-                # 特殊处理Other Bill类型
-                elif processed_type == "Other Bill":
-                    drive_folder_type = "Other"
-                    folder_id = self.FOLDER_IDS.get(drive_folder_type)
-                    logger.info(f"Other Bill特殊处理，使用Other文件夹ID: {folder_id}")
                 else:
-                    drive_folder_type = self.EXPENSE_TYPE_MAPPING.get(processed_type, processed_type)
-                    folder_id = self._get_folder_id(processed_type)
+                    drive_folder_type = self.EXPENSE_TYPE_MAPPING.get(receipt_type_or_name, receipt_type_or_name)
+                    folder_id = self._get_folder_id(receipt_type_or_name)
                 
                 # 日志记录
-                logger.info(f"收据类型: {processed_type}, 文件夹ID: {folder_id}")
+                logger.info(f"收据类型: {receipt_type_or_name}, 文件夹ID: {folder_id}")
                 # 添加类型映射日志
-                logger.info(f"上传类型: {receipt_type_or_name}, 映射后类型: {drive_folder_type or processed_type}")
+                logger.info(f"上传类型: {receipt_type_or_name}, 映射后类型: {drive_folder_type or receipt_type_or_name}")
             
             # 添加文件夹ID调试
             logger.info(f"📁 使用的文件夹ID: {folder_id}")
             
-            # 强制使用Other文件夹ID（如果存在）- 用于异常情况处理
-            if folder_id is None and processed_type and (
-                processed_type.lower() == "other bill" or 
-                (isinstance(processed_type, str) and processed_type.lower().startswith("other"))
-            ):
-                other_folder_id = self.FOLDER_IDS.get("Other")
-                if other_folder_id:
-                    folder_id = other_folder_id
-                    logger.info(f"⚠️ 未找到正常文件夹ID，强制使用Other文件夹ID: {folder_id}")
-            
-            # 强制使用Purchasing文件夹ID（如果存在）- 用于异常情况处理
-            if folder_id is None and processed_type and (
-                processed_type == "Purchasing" or 
-                (isinstance(processed_type, str) and processed_type.lower() == "purchasing")
-            ):
-                purchasing_folder_id = self.FOLDER_IDS.get("Purchasing")
-                if purchasing_folder_id:
-                    folder_id = purchasing_folder_id
-                    logger.info(f"⚠️ 未找到正常文件夹ID，强制使用Purchasing文件夹ID: {folder_id}")
-            
-            # 最后的兜底检查 - 如果仍然没有folder_id，尝试使用备选文件夹
-            if folder_id is None:
-                logger.warning("⚠️ 所有文件夹ID获取尝试均失败，尝试兜底措施")
-                # 对于supplier_other类型，使用Purchasing文件夹作为最后的备选
-                if processed_type == "supplier_other" or (isinstance(processed_type, str) and processed_type.lower() == "supplier_other"):
-                    folder_id = self.FOLDER_IDS.get("Purchasing", '10t-PQiLF91bUrF3oqOCaSJvBuXDzVb9i')
-                    logger.info(f"⚠️ 使用Purchasing文件夹ID作为supplier_other类型的兜底: {folder_id}")
-                # 对于Purchasing类型，使用硬编码ID作为最后的备选
-                elif processed_type == "Purchasing" or (isinstance(processed_type, str) and processed_type.lower() == "purchasing"):
-                    folder_id = '10t-PQiLF91bUrF3oqOCaSJvBuXDzVb9i'  # 直接使用提供的ID
-                    logger.info(f"⚠️ 使用硬编码Purchasing文件夹ID作为兜底: {folder_id}")
-
             # 创建文件元数据
             file_metadata = {
                 'name': file_name,
@@ -403,92 +322,52 @@ class GoogleDriveUploader:
             
             # 执行上传
             logger.info("开始上传文件...")
-            # 添加上传文件夹信息日志
-            logger.info(f"🚨 正在上传到文件夹: {processed_type} (原始:{receipt_type_or_name}) → {folder_id}")
+            file = self.drive_service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id, webViewLink'
+            ).execute()
             
-            # 针对不同类型添加特定日志
-            if processed_type == "Purchasing" or (isinstance(processed_type, str) and processed_type.lower() == "purchasing"):
-                purchasing_folder_id = self.FOLDER_IDS.get("Purchasing")
-                logger.info(f"🛒 Purchasing检查: 文件夹ID={purchasing_folder_id}, 当前使用={folder_id}")
-                
-                # 如果没有找到正确的文件夹ID，尝试强制使用Purchasing文件夹
-                if folder_id is None and purchasing_folder_id:
-                    folder_id = purchasing_folder_id
-                    file_metadata['parents'] = [folder_id]
-                    logger.info(f"🛒 强制使用Purchasing文件夹ID: {folder_id}")
+            file_id = file.get('id')
+            logger.info(f"文件上传成功，文件ID: {file_id}")
             
-            # 处理supplier_other类型
-            if processed_type == "supplier_other" or (isinstance(processed_type, str) and processed_type.lower() == "supplier_other"):
-                supplier_other_folder_id = self.FOLDER_IDS.get("supplier_other")
-                purchasing_folder_id = self.FOLDER_IDS.get("Purchasing")
-                logger.info(f"🏭 Supplier Other检查: supplier_other文件夹ID={supplier_other_folder_id}, purchasing文件夹ID={purchasing_folder_id}, 当前使用={folder_id}")
-                
-                # 如果没有找到正确的文件夹ID，尝试强制使用supplier_other或Purchasing文件夹
-                if folder_id is None:
-                    if supplier_other_folder_id:
-                        folder_id = supplier_other_folder_id
-                    elif purchasing_folder_id:
-                        folder_id = purchasing_folder_id
-                    
-                    if folder_id:
-                        file_metadata['parents'] = [folder_id]
-                        logger.info(f"🏭 强制使用供应商文件夹ID: {folder_id}")
-                        file = self.drive_service.files().create(
-                            body=file_metadata,
-                            media_body=media,
-                            fields='id, webViewLink'
-                        ).execute()
-                        
-                        file_id = file.get('id')
-                        logger.info(f"文件上传成功，文件ID: {file_id}")
-                        
-                        # 设置文件权限为"任何人都可以查看"
-                        logger.info("设置文件权限为公开...")
-                        self.drive_service.permissions().create(
-                            fileId=file_id,
-                            body={'type': 'anyone', 'role': 'reader'},
-                            fields='id'
-                        ).execute()
-                        
-                        public_link = file.get('webViewLink', '')
-                        logger.info(f"生成公开链接: {public_link}")
-                        
-                        # 记录上传结果的详细信息
-                        upload_summary = {
-                            "original_type": receipt_type_or_name,
-                            "processed_type": processed_type,
-                            "folder_id": folder_id,
-                            "file_id": file_id,
-                            "file_name": file_name
-                        }
-                        logger.info(f"📊 上传结果摘要: {upload_summary}")
-                        
-                        # 为了兼容旧代码，如果调用方式是旧的，则直接返回链接
-                        if not is_file_path and not isinstance(receipt_type_or_name, str):
-                            return public_link
-                        
-                        # 否则返回包含ID和链接的字典
-                        return {
-                            'file_id': file_id,
-                            'public_link': public_link
-                        }
+            # 设置文件权限为"任何人都可以查看"
+            logger.info("设置文件权限为公开...")
+            self.drive_service.permissions().create(
+                fileId=file_id,
+                body={'type': 'anyone', 'role': 'reader'},
+                fields='id'
+            ).execute()
             
-            except Exception as e:
-                # 详细记录异常
-                logger.exception(f"🔥 文件上传严重失败: {str(e)}")
-                logger.error(f"📂 上传参数: type={receipt_type_or_name}, mime={mime_type}")
-                
-                # 如果是HTTP错误，记录响应内容
-                if hasattr(e, 'content'):
-                    try:
-                        error_details = json.loads(e.content)
-                        logger.error(f"Google API错误详情: {error_details}")
-                    except:
-                        logger.error(f"原始错误响应: {e.content}")
-                
-                if not is_file_path and not isinstance(receipt_type_or_name, str):
-                    return None  # 兼容旧代码
-                raise
+            public_link = file.get('webViewLink', '')
+            logger.info(f"生成公开链接: {public_link}")
+            
+            # 为了兼容旧代码，如果调用方式是旧的，则直接返回链接
+            if not is_file_path and not isinstance(receipt_type_or_name, str):
+                return public_link
+            
+            # 否则返回包含ID和链接的字典
+            return {
+                'file_id': file_id,
+                'public_link': public_link
+            }
+            
+        except Exception as e:
+            # 详细记录异常
+            logger.exception(f"🔥 文件上传严重失败: {str(e)}")
+            logger.error(f"📂 上传参数: type={receipt_type_or_name}, mime={mime_type}")
+            
+            # 如果是HTTP错误，记录响应内容
+            if hasattr(e, 'content'):
+                try:
+                    error_details = json.loads(e.content)
+                    logger.error(f"Google API错误详情: {error_details}")
+                except:
+                    logger.error(f"原始错误响应: {e.content}")
+            
+            if not is_file_path and not isinstance(receipt_type_or_name, str):
+                return None  # 兼容旧代码
+            raise
     
     def _upload_invoice_pdf(self, file_stream, mime_type=None):
         """专用方法上传发票PDF到指定文件夹"""
