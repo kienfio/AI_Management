@@ -1041,7 +1041,8 @@ async def custom_supplier_handler(update: Update, context: ContextTypes.DEFAULT_
     context.user_data['cost_supplier'] = supplier_name
     
     # 标记这是自定义供应商，以便上传照片时使用特定文件夹
-    context.user_data['is_custom_supplier'] = True
+context.user_data['is_custom_supplier'] = True
+logger.info(f"✅ 已设置自定义供应商标记，供应商名称: {supplier_name}")
     
     # 清除等待标记
     context.user_data.pop('waiting_for_custom_supplier', None)
@@ -1217,9 +1218,11 @@ async def cost_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.info(f"📋 费用类型映射后: '{drive_folder_type}'")
         
         # 检查是否是自定义供应商，如果是则使用supplier_other文件夹
-        if context.user_data.get('is_custom_supplier') and (cost_type == "Purchasing" or cost_type_lower == "purchasing"):
-            drive_folder_type = "supplier_other"
-            logger.info("检测到自定义供应商，使用supplier_other文件夹")
+if context.user_data.get('is_custom_supplier') and (cost_type == "Purchasing" or cost_type_lower == "purchasing"):
+    drive_folder_type = "supplier_other"
+    logger.info(f"检测到自定义供应商，使用supplier_other文件夹，原始类型：{cost_type}")
+    # 添加额外的日志以确认自定义供应商状态
+    logger.info(f"⚠️ 自定义供应商标记状态: {context.user_data.get('is_custom_supplier')}")
         
         # 检查是否是其他支出类型 - 统一使用"Other"作为文件夹类型
         if cost_type.lower() == "other" or cost_type.lower().startswith("other expense") or cost_type.lower().startswith("other bill"):
