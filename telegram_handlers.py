@@ -1202,7 +1202,8 @@ async def cost_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             "water bill": "water",
             "electricity bill": "electricity",
             "wifi bill": "wifi",
-            "purchasing": "purchasing"
+            "purchasing": "purchasing",
+            "other": "Other"  # 添加Other类型映射
         }
         
         # 转换为小写进行匹配
@@ -1213,6 +1214,11 @@ async def cost_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         if context.user_data.get('is_custom_supplier') and cost_type == "Purchasing":
             drive_folder_type = "supplier_other"
             logger.info("检测到自定义供应商，使用supplier_other文件夹")
+        
+        # 检查是否是其他支出类型
+        if cost_type == "Other" or cost_type.startswith("Other Expense"):
+            drive_folder_type = "Other"
+            logger.info("检测到Other类型支出，使用Other文件夹")
         
         # 添加日志，记录映射后的类型
         logger.info(f"映射后的文件夹类型: {drive_folder_type}")
