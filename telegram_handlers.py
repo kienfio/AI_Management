@@ -1309,11 +1309,11 @@ async def cost_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         sheets_manager = SheetsManager()
         data = {
             'date': date_str,
-            'type': cost_type,
+            'expense_type': cost_type,  # 修改为expense_type以匹配表头
             'supplier': supplier if cost_type != "Worker Salary" else worker,  # 如果是工资，使用工作人员名称
             'amount': amount,
             'category': supplier if supplier else (worker if worker else 'Other'),
-            'description': desc,
+            'notes': desc,  # 修改为notes以匹配表头
             'receipt': receipt_link  # 使用Google Drive链接
         }
         
@@ -1349,7 +1349,7 @@ async def cost_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             # 更新描述信息，包含EPF和SOCSO状态
             epf_text = "EPF启用" if context.user_data.get('epf_enabled', False) else "EPF未启用"
             socso_text = "SOCSO启用" if context.user_data.get('socso_enabled', False) else "SOCSO未启用"
-            data['description'] = f"{desc} ({epf_text}, {socso_text})"
+            data['notes'] = f"{desc} ({epf_text}, {socso_text})"  # 修改为notes以匹配表头
         
         sheets_manager.add_expense_record(data)
         
