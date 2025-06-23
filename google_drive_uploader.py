@@ -56,9 +56,19 @@ class GoogleDriveUploader:
             "supplier_other": os.getenv('DRIVE_FOLDER_SUPPLIER_OTHER'),  # Purchasing > Other的自定义供应商文件夹
             "Other": os.getenv('DRIVE_FOLDER_PURCHASING_OTHER')    # Other类型的费用文件夹
         }
-        # 单独记录Other文件夹ID，确保正确设置
+        # 单独记录各类文件夹ID，确保正确设置
         other_folder_id = os.getenv('DRIVE_FOLDER_PURCHASING_OTHER')
+        purchasing_folder_id = os.getenv('DRIVE_FOLDER_PURCHASING')
+        supplier_other_folder_id = os.getenv('DRIVE_FOLDER_SUPPLIER_OTHER')
+        
         logger.info(f"🔹 Other文件夹ID: {other_folder_id}")
+        logger.info(f"🔹 Purchasing文件夹ID: {purchasing_folder_id}")
+        logger.info(f"🔹 Supplier Other文件夹ID: {supplier_other_folder_id}")
+        
+        # 检查文件夹ID是否正确设置
+        if not purchasing_folder_id:
+            logger.warning("⚠️ DRIVE_FOLDER_PURCHASING环境变量未设置或为空")
+        
         logger.info(f"已初始化文件夹ID映射: {self.FOLDER_IDS}")
     
     def reinitialize(self):
@@ -136,6 +146,9 @@ class GoogleDriveUploader:
         """根据费用类型获取对应的文件夹ID"""
         logger.info(f"获取文件夹ID，费用类型: {expense_type}")
         
+        # 记录原始expense_type以便调试
+        logger.info(f"💼 _get_folder_id 原始类型: '{expense_type}'")
+        
         # 1. 优先处理发票PDF专用文件夹
         if expense_type == "invoice_pdf":
             folder_id = os.getenv('DRIVE_FOLDER_INVOICE_PDF')
@@ -146,6 +159,12 @@ class GoogleDriveUploader:
         if expense_type.lower() == "supplier_other":
             folder_id = self.FOLDER_IDS.get("supplier_other")
             logger.info(f"自定义供应商文件夹ID: {folder_id}")
+            return folder_id
+        
+        # 1.55 处理采购(Purchasing)类型
+        if expense_type == "Purchasing" or expense_type == "purchasing":
+            folder_id = self.FOLDER_IDS.get("Purchasing")
+            logger.info(f"采购类型文件夹ID: {folder_id}")
             return folder_id
             
         # 1.6 处理Other类型支出 - 使用大小写不敏感比较
@@ -218,12 +237,17 @@ class GoogleDriveUploader:
             # 强制记录日志
             logger.info(f"⏫ 开始上传文件 | 类型: {receipt_type_or_name} | MIME: {mime_type}")
             
-            # 预处理收据类型 - 处理"Other Bill: xxx"格式
+            # 预处理收据类型 - 处理特殊格式
             processed_type = receipt_type_or_name
             if isinstance(receipt_type_or_name, str):
+                # 处理"Other Bill: xxx"格式
                 if receipt_type_or_name.lower().startswith("other bill:"):
                     processed_type = "Other Bill"
                     logger.info(f"🔄 检测到Other Bill格式，规范化为: {processed_type}")
+                # 处理purchasing格式（确保大小写正确）
+                elif receipt_type_or_name.lower() == "purchasing":
+                    processed_type = "Purchasing"  # 使用正确的大小写
+                    logger.info(f"🔄 统一Purchasing大小写: {processed_type}")
             
             # 添加PDF专用上传逻辑
             if processed_type == "invoice_pdf":
@@ -321,6 +345,16 @@ class GoogleDriveUploader:
                     folder_id = other_folder_id
                     logger.info(f"⚠️ 未找到正常文件夹ID，强制使用Other文件夹ID: {folder_id}")
             
+            # 强制使用Purchasing文件夹ID（如果存在）- 用于异常情况处理
+            if folder_id is None and processed_type and (
+                processed_type == "Purchasing" or 
+                (isinstance(processed_type, str) and processed_type.lower() == "purchasing")
+            ):
+                purchasing_folder_id = self.FOLDER_IDS.get("Purchasing")
+                if purchasing_folder_id:
+                    folder_id = purchasing_folder_id
+                    logger.info(f"⚠️ 未找到正常文件夹ID，强制使用Purchasing文件夹ID: {folder_id}")
+            
             # 创建文件元数据
             file_metadata = {
                 'name': file_name,
@@ -351,6 +385,17 @@ class GoogleDriveUploader:
             logger.info("开始上传文件...")
             # 添加上传文件夹信息日志
             logger.info(f"🚨 正在上传到文件夹: {processed_type} (原始:{receipt_type_or_name}) → {folder_id}")
+            
+            # 针对不同类型添加特定日志
+            if processed_type == "Purchasing" or (isinstance(processed_type, str) and processed_type.lower() == "purchasing"):
+                purchasing_folder_id = self.FOLDER_IDS.get("Purchasing")
+                logger.info(f"🛒 Purchasing检查: 文件夹ID={purchasing_folder_id}, 当前使用={folder_id}")
+                
+                # 如果没有找到正确的文件夹ID，尝试强制使用Purchasing文件夹
+                if folder_id is None and purchasing_folder_id:
+                    folder_id = purchasing_folder_id
+                    file_metadata['parents'] = [folder_id]
+                    logger.info(f"🛒 强制使用Purchasing文件夹ID: {folder_id}")
             file = self.drive_service.files().create(
                 body=file_metadata,
                 media_body=media,
@@ -370,6 +415,16 @@ class GoogleDriveUploader:
             
             public_link = file.get('webViewLink', '')
             logger.info(f"生成公开链接: {public_link}")
+            
+            # 记录上传结果的详细信息
+            upload_summary = {
+                "original_type": receipt_type_or_name,
+                "processed_type": processed_type,
+                "folder_id": folder_id,
+                "file_id": file_id,
+                "file_name": file_name
+            }
+            logger.info(f"📊 上传结果摘要: {upload_summary}")
             
             # 为了兼容旧代码，如果调用方式是旧的，则直接返回链接
             if not is_file_path and not isinstance(receipt_type_or_name, str):
