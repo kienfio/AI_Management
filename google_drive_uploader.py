@@ -55,6 +55,9 @@ class GoogleDriveUploader:
             "supplier_other": os.getenv('DRIVE_FOLDER_SUPPLIER_OTHER'),  # Purchasing > Other的自定义供应商文件夹
             "Other": os.getenv('DRIVE_FOLDER_PURCHASING_OTHER')    # Other类型的费用文件夹
         }
+        # 单独记录Other文件夹ID，确保正确设置
+        other_folder_id = os.getenv('DRIVE_FOLDER_PURCHASING_OTHER')
+        logger.info(f"🔹 Other文件夹ID: {other_folder_id}")
         logger.info(f"已初始化文件夹ID映射: {self.FOLDER_IDS}")
     
     def reinitialize(self):
@@ -144,8 +147,8 @@ class GoogleDriveUploader:
             logger.info(f"自定义供应商文件夹ID: {folder_id}")
             return folder_id
             
-        # 1.6 处理Other类型支出
-        if expense_type == "Other":
+        # 1.6 处理Other类型支出 - 使用大小写不敏感比较
+        if expense_type.lower() in ["other", "other expense"]:
             folder_id = self.FOLDER_IDS.get("Other")
             logger.info(f"Other类型支出文件夹ID: {folder_id}")
             return folder_id
@@ -260,6 +263,7 @@ class GoogleDriveUploader:
             # 获取目标文件夹ID
             folder_id = None
             drive_folder_type = None
+            logger.info(f"🔍 收据类型原始值: '{receipt_type_or_name}'")
             if isinstance(receipt_type_or_name, str):
                 # 处理特殊情况
                 if receipt_type_or_name == "Water Bill":
@@ -322,6 +326,8 @@ class GoogleDriveUploader:
             
             # 执行上传
             logger.info("开始上传文件...")
+            # 添加上传文件夹信息日志
+            logger.info(f"🚨 正在上传到文件夹: {receipt_type_or_name} → {folder_id}")
             file = self.drive_service.files().create(
                 body=file_metadata,
                 media_body=media,
