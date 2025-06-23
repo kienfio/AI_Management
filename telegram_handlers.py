@@ -1606,6 +1606,14 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     # 清除用户数据
     context.user_data.clear()
     
+    # 刷新数据缓存，确保报表使用最新数据
+    try:
+        from google_sheets import sheets_manager
+        sheets_manager.refresh_data_cache()
+        logger.info("✅ 报表数据已刷新")
+    except Exception as e:
+        logger.error(f"❌ 刷新报表数据失败: {e}")
+    
     # 显示报表中心菜单
     return await report_menu(update, context)
 
@@ -1979,6 +1987,12 @@ async def report_export_handler(update: Update, context: ContextTypes.DEFAULT_TY
     
     try:
         sheets_manager = SheetsManager()
+        
+        # 刷新数据缓存，确保导出最新数据
+        from google_sheets import sheets_manager as gs_manager
+        gs_manager.refresh_data_cache()
+        logger.info("✅ 报表导出前已刷新数据")
+        
         current_year = datetime.now().year
         
         # 根据导出类型处理
