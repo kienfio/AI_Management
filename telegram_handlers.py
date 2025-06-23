@@ -1216,7 +1216,7 @@ async def cost_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             logger.info("检测到自定义供应商，使用supplier_other文件夹")
         
         # 检查是否是其他支出类型 - 统一使用"Other"作为文件夹类型
-        if cost_type.lower() == "other" or cost_type.lower().startswith("other expense"):
+        if cost_type.lower() == "other" or cost_type.lower().startswith("other expense") or cost_type.lower().startswith("other bill"):
             drive_folder_type = "Other"
             logger.info(f"检测到Other类型支出({cost_type})，统一使用Other文件夹")
         
